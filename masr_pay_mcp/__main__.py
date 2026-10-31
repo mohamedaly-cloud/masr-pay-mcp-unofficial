@@ -25,6 +25,8 @@ def configure_logging() -> None:
     # redacting filter masks it anyway; this just keeps the noise (and the risk) down.
     logging.getLogger("httpx2").setLevel(logging.WARNING)
     logging.getLogger("httpcore2").setLevel(logging.WARNING)
+    # The audit trail is a requirement, not debug output: FAWRY_LOG_LEVEL never silences it.
+    logging.getLogger("masr_pay_mcp.audit").setLevel(logging.INFO)
 
 
 def main() -> None:

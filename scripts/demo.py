@@ -8,6 +8,10 @@
 3. "Charge Ahmed 150 EGP for order 42, he'll pay cash" -> create_cash_payment
 4. The customer pays cash at a Fawry outlet          -> mock /__admin/kiosk-pay
 5. "Has it been paid?"                                -> get_payment_status -> yes
+6. "Refund him"                -> refund_payment previews and returns a confirmation token
+7. "Yes"                       -> refund_payment again with the token -> refunded
+
+The server's audit log (one JSON line per tool call) goes to stderr.
 
 Everything is local and fake. No real money, no real credentials.
 """
@@ -102,6 +106,24 @@ async def run(mock_url: str) -> None:
         if not status.structured_content["is_paid"]:
             raise SystemExit("Demo failed: the order should be paid by now.")
         print(f"\nAssistant: {status.structured_content['summary']}")
+
+        refund_args = {"order_id": "42", "reason": "Customer returned the item"}
+        print('\nUser: "He returned it, refund him."')
+        preview = await mcp.call_tool("refund_payment", refund_args)
+        if preview.is_error or preview.structured_content["executed"]:
+            raise SystemExit(f"Demo failed: the first refund call must only preview: {preview}")
+        show("refund_payment (step 1: preview, nothing changed)", preview.structured_content)
+        print(f"\nAssistant: {preview.structured_content['summary']}")
+
+        print('\nUser: "Yes, refund 150 EGP."')
+        refund = await mcp.call_tool(
+            "refund_payment",
+            {**refund_args, "confirmation_token": preview.structured_content["confirmation_token"]},
+        )
+        if refund.is_error:
+            raise SystemExit(f"refund_payment failed: {refund.content}")
+        show("refund_payment (step 2: confirmed with the token)", refund.structured_content)
+        print(f"\nAssistant: {refund.structured_content['summary']}")
 
 
 def main() -> None:
