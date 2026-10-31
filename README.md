@@ -13,6 +13,8 @@ An **unofficial** [MCP](https://modelcontextprotocol.io) server that lets an AI 
 > **Merchant:** Did Ahmed pay?
 > **Assistant:** Yes, order 42 is paid: 150.00 EGP received on 31 Oct at 22:47.
 
+![Demo: an AI assistant creates a Pay-at-Fawry payment, sees it paid, and refunds it only after the merchant confirms](docs/demo.gif)
+
 It's for merchants contracted **directly with FawryPay**, and for the developers and agencies who
 build sales bots for them. Paymob has an official MCP server; Fawry doesn't, so this one talks to
 FawryPay's own API and its network of outlets.
