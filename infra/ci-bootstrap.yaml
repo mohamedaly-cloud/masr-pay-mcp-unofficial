@@ -128,6 +128,9 @@ Resources:
                   - lambda:TagResource
                   - lambda:UntagResource
                   - lambda:ListTags
+                  - lambda:PutFunctionConcurrency # the mock runs as exactly one copy
+                  - lambda:DeleteFunctionConcurrency
+                  - lambda:GetFunctionConcurrency
                 Resource: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${AppStackName}-*
               - Sid: WebAdapterLayer
                 Effect: Allow

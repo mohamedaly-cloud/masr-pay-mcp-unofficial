@@ -171,13 +171,17 @@ Resources:
     Metadata:
       BuildMethod: makefile
     Properties:
-      # shortcut: orders live in this instance's memory, so a second concurrent instance (or a
-      # cold start) starts empty. Fine for a demo; a shared demo store would need DynamoDB.
+      # Orders live in this instance's memory, so the mock must never run as two copies at once:
+      # a second copy would start empty and "lose" demo orders. Overlapping requests are throttled
+      # instead (the API answers 429/503; try again). Needs the account's Lambda concurrency limit
+      # above 10 (requested 2026-10-31). shortcut: a cold start still empties it; a demo that must
+      # survive restarts would need DynamoDB.
       Description: Mock of Fawry's API for demos (fake merchant, fake money, in-memory orders)
       CodeUri: ../
       Handler: run-mock.sh
       Role: !GetAtt MockRole.Arn
       MemorySize: 256
+      ReservedConcurrentExecutions: 1
       LoggingConfig:
         LogGroup: !Ref MockLogGroup
       Events:

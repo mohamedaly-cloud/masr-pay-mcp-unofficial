@@ -73,8 +73,9 @@ sequenceDiagram
   Refunds are also off by default and capped (2,000 EGP each by default).
 - **Nothing is stored.** The merchant's Fawry key comes with each request and is dropped after it.
   No database, no customer data kept.
-- **"Paid" is never taken on trust.** Every Fawry response is signature-checked; a reply that fails
-  the check is never reported as paid.
+- **"Paid" is never taken on trust.** Every Fawry response with order data is signature-checked,
+  and after a refund or cancel the status is fetched and checked again. Nothing is reported as
+  paid on an unverified reply.
 - **Every call is audited:** one JSON line per tool call, with keys, phones and emails redacted.
 - **Least-privilege AWS:** deploys from GitHub without stored keys; each function can touch only
   its own logs and secret. Details in [docs/threat-model.md](docs/threat-model.md).
