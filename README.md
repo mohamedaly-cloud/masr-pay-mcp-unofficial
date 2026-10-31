@@ -1,22 +1,89 @@
-# fawry-mcp-unofficial
+# masr-pay-mcp-unofficial
 
-An **unofficial** [MCP](https://modelcontextprotocol.io) server for FawryPay. It lets an AI
-assistant take cash payments in Egypt through **Pay-at-Fawry**: the assistant creates a
-reference number, the customer pays cash at any Fawry outlet, and the assistant checks whether
-it was paid.
+[![ci](https://github.com/mohamedaly-cloud/masr-pay-mcp-unofficial/actions/workflows/ci.yml/badge.svg)](https://github.com/mohamedaly-cloud/masr-pay-mcp-unofficial/actions/workflows/ci.yml)
 
-It's for merchants contracted **directly with FawryPay**, and for the developers and agencies
-who build sales bots for them. It's an MCP server for FawryPay's own API, not the only way an
-agent can take cash payments in Egypt.
+An **unofficial** [MCP](https://modelcontextprotocol.io) server that lets an AI assistant take
+**cash payments in Egypt through FawryPay's Pay-at-Fawry**:
+
+> **Merchant:** Charge Ahmed 150 EGP for order 42, he'll pay cash.
+> **Assistant:** Done. Ahmed can pay 150.00 EGP at any Fawry outlet with reference **974376251**, before 3 Nov.
+>
+> *(Ahmed pays at a Fawry shop.)*
+>
+> **Merchant:** Did Ahmed pay?
+> **Assistant:** Yes, order 42 is paid: 150.00 EGP received on 31 Oct at 22:47.
+
+It's for merchants contracted **directly with FawryPay**, and for the developers and agencies who
+build sales bots for them. Paymob has an official MCP server; Fawry doesn't, so this one talks to
+FawryPay's own API and its network of outlets.
 
 > **Not affiliated with, endorsed by, or supported by Fawry.** "Fawry" and "FawryPay" are used
-> only to describe the API this project talks to. The server is stateless: it never stores
-> credentials or funds.
+> only to describe the API this project talks to. The server never stores credentials, customer
+> data or funds.
+
+## Try the live demo
+A public copy runs on AWS against a **mock** of Fawry (fake merchant, fake money). Point any MCP
+client that supports Streamable HTTP and custom headers at it:
+
+```json
+{
+  "type": "http",
+  "url": "https://3t8oh2vfxb.execute-api.eu-west-1.amazonaws.com/mcp",
+  "headers": {
+    "X-Fawry-Merchant-Code": "MOCKMERCHANT0001",
+    "X-Fawry-Secure-Key": "mock-secure-key-not-a-real-fawry-key"
+  }
+}
+```
+
+Or use [MCP Inspector](docs/inspector.md): transport Streamable HTTP, that URL, those two headers.
+
+Then ask your assistant to charge someone, and play the customer paying cash at an outlet:
+```bash
+curl -X POST https://ig7kh4i8u8.execute-api.eu-west-1.amazonaws.com/__admin/kiosk-pay/<reference_number>
+```
+The demo is public: use made-up names, phones and emails.
+
+## How it works
+```mermaid
+sequenceDiagram
+    participant M as Merchant
+    participant A as AI assistant
+    participant S as This MCP server
+    participant F as FawryPay
+    participant C as Customer
+    M->>A: "Charge Ahmed 150 EGP for order 42"
+    A->>S: create_cash_payment
+    S->>F: signed charge request
+    F-->>S: reference number (signature verified)
+    S-->>A: reference + instructions
+    A-->>M: "Ahmed can pay with reference 974376251"
+    C->>F: pays cash at a Fawry outlet
+    M->>A: "Did Ahmed pay?"
+    A->>S: get_payment_status
+    S->>F: signed status request
+    F-->>S: PAID (signature verified)
+    A-->>M: "Yes, paid at 22:47"
+```
+
+## Why it's safe to give an AI
+- **Refunds need a human.** A refund or cancellation never happens on the first call: it returns
+  a preview and a short-lived token bound to the exact order and amount. The action happens only
+  when the call is repeated with that token, and supporting clients ask the human directly.
+  Refunds are also off by default and capped (2,000 EGP each by default).
+- **Nothing is stored.** The merchant's Fawry key comes with each request and is dropped after it.
+  No database, no customer data kept.
+- **"Paid" is never taken on trust.** Every Fawry response is signature-checked; a reply that fails
+  the check is never reported as paid.
+- **Every call is audited:** one JSON line per tool call, with keys, phones and emails redacted.
+- **Least-privilege AWS:** deploys from GitHub without stored keys; each function can touch only
+  its own logs and secret. Details in [docs/threat-model.md](docs/threat-model.md).
 
 ## Status
-Milestone 3 of 4: four MCP tools, over stdio locally and over Streamable HTTP on AWS Lambda,
-built on the official MCP Python SDK v2 (protocol 2026-07-28). Until official sandbox credentials
-are issued, everything runs against our own mock of the Fawry API, which is also deployed.
+v0.1. Four tools, over stdio locally and over Streamable HTTP on AWS Lambda, built on the official
+MCP Python SDK v2 (protocol 2026-07-28). Until FawryPay issues sandbox credentials, everything is
+built and tested against our own mock of the Fawry API. What still needs Fawry's confirmation is
+listed in [docs/decisions.md](docs/decisions.md#verify-list).
 
 ## Tools
 | Tool | What it does | Safety |
@@ -41,46 +108,7 @@ Also built in: one redacted JSON **audit line per tool call** (stderr), a **per-
 (default 50,000 EGP), refunds capped at the order amount, and Fawry response signatures verified
 before anything is reported as paid. See [docs/threat-model.md](docs/threat-model.md).
 
-## Layout
-```
-masr_pay_mcp/server.py                     the four MCP tools
-masr_pay_mcp/web.py                        the hosted server (Streamable HTTP, for Lambda)
-masr_pay_mcp/core/confirm.py               stateless HMAC confirmation tokens
-masr_pay_mcp/core/audit.py                 one structured audit line per tool call
-masr_pay_mcp/core/guardrails.py            payment limit, refund cap
-masr_pay_mcp/core/redaction.py             keeps secrets and customer PII out of logs
-masr_pay_mcp/core/provider.py              provider-neutral interface the tools use
-masr_pay_mcp/providers/fawry/provider.py   FawryPay behind that interface
-masr_pay_mcp/providers/fawry/client.py     signs requests, verifies responses, normalizes fields
-masr_pay_mcp/providers/fawry/config.py     environment + credentials (read fresh on every call)
-masr_pay_mcp/providers/fawry/signatures.py Fawry SHA-256 signature recipes, one function each
-mock_fawry/                                FastAPI mock of Fawry staging (in-memory orders)
-tests/                                     pytest; tests/vectors.json holds our own signature vectors
-scripts/demo.py                            milestone demo over real stdio
-scripts/smoke_remote.py                    the same story against the deployed stack
-infra/template.yaml                        SAM: Lambda + API Gateway, secret, logs, IAM
-infra/ci-bootstrap.yaml                    one-time: GitHub OIDC deploy role, boundary, bucket
-.github/workflows/ci.yml                   lint, tests, pip-audit, cfn-lint; deploy on main
-docs/design.md                             what it is, the rules, and the Fawry API reference
-docs/decisions.md                          why things are the way they are, plus the "verify" list
-docs/threat-model.md                       threats and the code that mitigates each
-docs/inspector.md                          MCP Inspector walkthrough
-```
-
-## Develop
-```bash
-python3.12 -m venv .venv && . .venv/bin/activate
-pip install -e ".[dev]"
-pytest
-ruff check . && ruff format --check .
-```
-
-## Run the demo
-```bash
-python scripts/demo.py   # create 150 EGP for order 42 -> pay -> "paid?" -> refund preview -> confirm
-```
-
-## Use it from an MCP host
+## Run it locally
 The server speaks stdio: `python -m masr_pay_mcp`, or the `masr-pay-mcp-unofficial` command. Example
 host entry (the `mcpServers` format most MCP hosts use), pointed at the local mock:
 ```json
@@ -111,6 +139,11 @@ host entry (the `mcpServers` format most MCP hosts use), pointed at the local mo
 | `MASR_PAY_CONFIRM_SECRET_ARN` | HTTP server only: read the key from this Secrets Manager secret (what the AWS stack does). |
 
 See [docs/inspector.md](docs/inspector.md) to watch the raw MCP traffic.
+
+## Run the local demo
+```bash
+python scripts/demo.py   # create 150 EGP for order 42 -> pay -> "paid?" -> refund preview -> confirm
+```
 
 ## Hosted on AWS
 ```
@@ -168,5 +201,40 @@ Mock-only admin endpoints:
 Order lifecycle in the mock: `UNPAID → PAID` (kiosk-pay), `UNPAID → EXPIRED` (after
 `paymentExpiry`), `UNPAID → CANCELED`, `PAID → REFUNDED` (one refund per order).
 
+## Develop
+```bash
+python3.12 -m venv .venv && . .venv/bin/activate
+pip install -e ".[dev]"
+pytest
+ruff check . && ruff format --check .
+```
+
+## Layout
+```
+masr_pay_mcp/server.py                     the four MCP tools
+masr_pay_mcp/web.py                        the hosted server (Streamable HTTP, for Lambda)
+masr_pay_mcp/core/confirm.py               stateless HMAC confirmation tokens
+masr_pay_mcp/core/audit.py                 one structured audit line per tool call
+masr_pay_mcp/core/guardrails.py            payment limit, refund cap
+masr_pay_mcp/core/redaction.py             keeps secrets and customer PII out of logs
+masr_pay_mcp/core/provider.py              provider-neutral interface the tools use
+masr_pay_mcp/providers/fawry/provider.py   FawryPay behind that interface
+masr_pay_mcp/providers/fawry/client.py     signs requests, verifies responses, normalizes fields
+masr_pay_mcp/providers/fawry/config.py     environment + credentials (read fresh on every call)
+masr_pay_mcp/providers/fawry/signatures.py Fawry SHA-256 signature recipes, one function each
+mock_fawry/                                FastAPI mock of Fawry staging (in-memory orders)
+tests/                                     pytest; tests/vectors.json holds our own signature vectors
+scripts/demo.py                            milestone demo over real stdio
+scripts/smoke_remote.py                    the same story against the deployed stack
+infra/template.yaml                        SAM: Lambda + API Gateway, secret, logs, IAM
+infra/ci-bootstrap.yaml                    one-time: GitHub OIDC deploy role, boundary, bucket
+.github/workflows/ci.yml                   lint, tests, pip-audit, cfn-lint; deploy on main
+docs/design.md                             what it is, the rules, and the Fawry API reference
+docs/decisions.md                          why things are the way they are, plus the "verify" list
+docs/threat-model.md                       threats and the code that mitigates each
+docs/openapi.yaml                          the four FawryPay endpoints we use, with confidence labels
+docs/inspector.md                          MCP Inspector walkthrough
+```
+
 ## License
-MIT
+[MIT](LICENSE)
