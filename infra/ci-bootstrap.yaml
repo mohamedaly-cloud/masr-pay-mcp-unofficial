@@ -1,0 +1,278 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  One-time setup for deploying masr-pay-mcp from GitHub Actions without stored AWS keys:
+  GitHub OIDC provider, a deploy role GitHub can assume (main branch only), the CloudFormation
+  role that actually creates resources, a permissions boundary, and the build artifact bucket.
+  Deploy by hand, once, as an admin:
+    aws cloudformation deploy --template-file infra/ci-bootstrap.yaml
+      --stack-name masr-pay-mcp-ci --capabilities CAPABILITY_NAMED_IAM
+
+# How the pieces limit each other:
+#   GitHub (main branch) --OIDC--> DeployRole: may only run change sets on the app stack,
+#     upload artifacts, and hand CloudFormationRole to CloudFormation.
+#   CloudFormationRole: creates the app's resources, only under masr-pay-mcp names, and may only
+#     create IAM roles named masr-pay-mcp-fn-* that carry the boundary below. The CI roles
+#     here are named masr-pay-mcp-ci-*, out of its reach, so it can't edit them.
+#   Boundary: whatever inline policy a role gets, it can never do more than write its own logs
+#     and read the app's secret. So a bad template can't mint an admin role.
+
+Parameters:
+  GitHubRepo:
+    Type: String
+    Default: mohamedaly-cloud/masr-pay-mcp-unofficial
+  AppStackName:
+    Type: String
+    Default: masr-pay-mcp
+  CreateOidcProvider:
+    Type: String
+    Default: "true"
+    AllowedValues: ["true", "false"]
+    Description: Set "false" if the account already has the GitHub OIDC provider.
+
+Conditions:
+  MakeOidcProvider: !Equals [!Ref CreateOidcProvider, "true"]
+
+Resources:
+  GitHubOidc:
+    Type: AWS::IAM::OIDCProvider
+    Condition: MakeOidcProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList: [sts.amazonaws.com]
+
+  ArtifactBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${AppStackName}-artifacts-${AWS::AccountId}-${AWS::Region}
+      OwnershipControls:
+        Rules: [{ ObjectOwnership: BucketOwnerEnforced }]
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+      LifecycleConfiguration:
+        Rules: [{ Id: expire-old-builds, Status: Enabled, ExpirationInDays: 30 }]
+
+  ArtifactBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref ArtifactBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: TlsOnly
+            Effect: Deny
+            Principal: "*"
+            Action: s3:*
+            Resource: [!GetAtt ArtifactBucket.Arn, !Sub "${ArtifactBucket.Arn}/*"]
+            Condition: { Bool: { aws:SecureTransport: "false" } }
+
+  Boundary:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: masr-pay-mcp-boundary
+      Description: Ceiling for every role the app stack creates (Lambda execution roles).
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: [logs:CreateLogStream, logs:PutLogEvents]
+            Resource: !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/masr-pay-mcp/*
+          - Effect: Allow
+            Action: secretsmanager:GetSecretValue
+            Resource: !Sub arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AppStackName}/*
+
+  CloudFormationRole:
+    Type: AWS::IAM::Role
+    Metadata:
+      cfn-lint:
+        config:
+          ignore_checks: [W3037] # apigateway:TagResource is real; see the HttpApis statement
+    Properties:
+      RoleName: !Sub ${AppStackName}-ci-cloudformation
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: cloudformation.amazonaws.com }
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals: { aws:SourceAccount: !Ref AWS::AccountId }
+      Policies:
+        - PolicyName: app-stack-resources
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: SamTransform # with --role-arn, CloudFormation expands the SAM template as this role
+                Effect: Allow
+                Action: cloudformation:CreateChangeSet
+                Resource: !Sub arn:${AWS::Partition}:cloudformation:${AWS::Region}:aws:transform/Serverless-2016-10-31
+              - Sid: Functions
+                Effect: Allow
+                Action:
+                  - lambda:CreateFunction
+                  - lambda:DeleteFunction
+                  - lambda:GetFunction
+                  - lambda:GetFunctionConfiguration
+                  - lambda:UpdateFunctionCode
+                  - lambda:UpdateFunctionConfiguration
+                  - lambda:AddPermission
+                  - lambda:RemovePermission
+                  - lambda:TagResource
+                  - lambda:UntagResource
+                  - lambda:ListTags
+                Resource: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${AppStackName}-*
+              - Sid: WebAdapterLayer
+                Effect: Allow
+                Action: lambda:GetLayerVersion
+                Resource: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:753240598075:layer:LambdaAdapterLayerX86:*
+              - Sid: CodeFromArtifactBucket
+                Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub ${ArtifactBucket.Arn}/*
+              - Sid: HttpApis # API Gateway has no name-based ARNs, so this is per region
+                Effect: Allow
+                # TagResource is required when creating stages, though cfn-lint's list lacks it (W3037).
+                Action: [apigateway:GET, apigateway:POST, apigateway:PUT, apigateway:PATCH, apigateway:DELETE, apigateway:TagResource, apigateway:UntagResource]
+                Resource:
+                  - !Sub arn:${AWS::Partition}:apigateway:${AWS::Region}::/apis
+                  - !Sub arn:${AWS::Partition}:apigateway:${AWS::Region}::/apis/*
+                  - !Sub arn:${AWS::Partition}:apigateway:${AWS::Region}::/tags/*
+              - Sid: LogGroups
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:DeleteLogGroup
+                  - logs:PutRetentionPolicy
+                  - logs:DeleteRetentionPolicy
+                  - logs:TagResource
+                  - logs:UntagResource
+                  - logs:ListTagsForResource
+                  - logs:TagLogGroup
+                Resource: !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/masr-pay-mcp/*
+              - Sid: AccessLogDelivery # API Gateway access logs need these account-wide calls
+                Effect: Allow
+                Action:
+                  - logs:DescribeLogGroups
+                  - logs:CreateLogDelivery
+                  - logs:GetLogDelivery
+                  - logs:UpdateLogDelivery
+                  - logs:DeleteLogDelivery
+                  - logs:ListLogDeliveries
+                  - logs:PutResourcePolicy
+                  - logs:DescribeResourcePolicies
+                Resource: "*"
+              - Sid: Secret
+                Effect: Allow
+                Action:
+                  - secretsmanager:CreateSecret
+                  - secretsmanager:DeleteSecret
+                  - secretsmanager:DescribeSecret
+                  - secretsmanager:UpdateSecret
+                  - secretsmanager:TagResource
+                  - secretsmanager:UntagResource
+                Resource: !Sub arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AppStackName}/*
+              - Sid: GenerateSecretValue
+                Effect: Allow
+                Action: secretsmanager:GetRandomPassword
+                Resource: "*"
+              - Sid: RolesOnlyWithTheBoundary
+                Effect: Allow
+                Action: [iam:CreateRole, iam:PutRolePolicy]
+                Resource: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${AppStackName}-fn-*
+                Condition:
+                  StringEquals: { iam:PermissionsBoundary: !Ref Boundary }
+              - Sid: ManageAppRoles
+                Effect: Allow
+                Action:
+                  - iam:GetRole
+                  - iam:GetRolePolicy
+                  - iam:ListRolePolicies
+                  - iam:ListAttachedRolePolicies
+                  - iam:DeleteRole
+                  - iam:DeleteRolePolicy
+                  - iam:TagRole
+                  - iam:UntagRole
+                  - iam:UpdateAssumeRolePolicy
+                Resource: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${AppStackName}-fn-*
+              - Sid: GiveAppRolesToLambdaOnly
+                Effect: Allow
+                Action: iam:PassRole
+                Resource: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${AppStackName}-fn-*
+                Condition:
+                  StringEquals: { iam:PassedToService: lambda.amazonaws.com }
+
+  DeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${AppStackName}-ci-github-deploy
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+                # Only workflow runs on main of this repo: not forks, not PRs, not other branches.
+                token.actions.githubusercontent.com:sub: !Sub repo:${GitHubRepo}:ref:refs/heads/main
+      Policies:
+        - PolicyName: deploy-app-stack
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: AppStackChangeSets
+                Effect: Allow
+                Action:
+                  - cloudformation:CreateChangeSet
+                  - cloudformation:DescribeChangeSet
+                  - cloudformation:ExecuteChangeSet
+                  - cloudformation:DeleteChangeSet
+                  - cloudformation:DescribeStacks
+                  - cloudformation:DescribeStackEvents
+                  - cloudformation:DescribeStackResource
+                  - cloudformation:DescribeStackResources
+                  - cloudformation:ListStackResources
+                  - cloudformation:GetTemplate
+                  - cloudformation:GetTemplateSummary
+                Resource: !Sub arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${AppStackName}/*
+              - Sid: SamTransform
+                Effect: Allow
+                Action: cloudformation:CreateChangeSet
+                Resource: !Sub arn:${AWS::Partition}:cloudformation:${AWS::Region}:aws:transform/Serverless-2016-10-31
+              - Sid: TemplateChecks
+                Effect: Allow
+                Action: [cloudformation:ValidateTemplate, cloudformation:GetTemplateSummary]
+                Resource: "*"
+              - Sid: Artifacts
+                Effect: Allow
+                Action: [s3:PutObject, s3:GetObject]
+                Resource: !Sub ${ArtifactBucket.Arn}/*
+              - Sid: ArtifactsList
+                Effect: Allow
+                Action: [s3:ListBucket, s3:GetBucketLocation]
+                Resource: !GetAtt ArtifactBucket.Arn
+              - Sid: HandTheCloudFormationRoleToCloudFormationOnly
+                Effect: Allow
+                Action: iam:PassRole
+                Resource: !GetAtt CloudFormationRole.Arn
+                Condition:
+                  StringEquals: { iam:PassedToService: cloudformation.amazonaws.com }
+
+Outputs:
+  DeployRoleArn:
+    Description: GitHub repo variable AWS_DEPLOY_ROLE_ARN
+    Value: !GetAtt DeployRole.Arn
+  CloudFormationRoleArn:
+    Description: GitHub repo variable AWS_CLOUDFORMATION_ROLE_ARN (sam deploy --role-arn)
+    Value: !GetAtt CloudFormationRole.Arn
+  ArtifactBucketName:
+    Description: GitHub repo variable AWS_ARTIFACT_BUCKET (sam deploy --s3-bucket)
+    Value: !Ref ArtifactBucket

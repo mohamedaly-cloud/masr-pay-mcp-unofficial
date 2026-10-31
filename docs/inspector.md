@@ -4,7 +4,7 @@ The [MCP Inspector](https://github.com/modelcontextprotocol/inspector) shows the
 between a client and our server: tool schemas, annotations, structured results and errors. Use it
 to see exactly what an AI assistant sees.
 
-Pinned to **Inspector 2.11.0** (docs/design.md: a version patched for CVE-2025-49596, fixed in
+Pinned to **Inspector 2.11.0** (design.md: a version patched for CVE-2025-49596, fixed in
 0.14.1). 2.11.0 was chosen because it had been out for more than two weeks; bump it on purpose,
 not with `@latest`.
 

@@ -4,13 +4,15 @@ Four tools: create a cash payment reference, check its status, cancel it
 before it's paid, refund it after it's paid. Descriptions are written for the
 model: what the tool does, when to use it, units (EGP), and what failures mean.
 
-Statelessness: every call loads credentials fresh (``config.load_config``)
-and builds a new ``FawryClient``. Nothing survives between calls.
+The tools only use the provider-neutral types in ``core/provider.py``; FawryPay is plugged in
+as ``FawryProvider``. Statelessness: every call loads credentials fresh
+(``config.load_config``, from the environment or the HTTP request headers) and builds a
+new provider. Nothing survives between calls.
 """
 
 import logging
 import re
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -27,15 +29,21 @@ from pydantic import AfterValidator, BaseModel, BeforeValidator, Field
 from masr_pay_mcp import __version__
 from masr_pay_mcp.core import confirm, guardrails
 from masr_pay_mcp.core.audit import audited
-from masr_pay_mcp.providers.fawry.client import (
-    FawryClient,
-    FawryError,
-    FawryUnavailable,
-    NormalizedStatus,
+from masr_pay_mcp.core.provider import (
+    ErrorKind,
+    Language,
     Payment,
-    ResponseSignatureError,
+    PaymentProvider,
+    PaymentRequest,
+    ProviderError,
+    ProviderUnavailable,
+    ResponseVerificationError,
+)
+from masr_pay_mcp.core.provider import (
+    PaymentStatus as NormalizedStatus,
 )
 from masr_pay_mcp.providers.fawry.config import ConfigError, FawryConfig, load_config
+from masr_pay_mcp.providers.fawry.provider import FawryProvider
 from masr_pay_mcp.providers.fawry.signatures import format_amount
 
 log = logging.getLogger(__name__)
@@ -112,6 +120,9 @@ LanguageCode = Annotated[
     Literal["en-gb", "ar-eg"],
     Field(description="Language for Fawry's customer-facing messages: 'en-gb' or 'ar-eg'."),
 ]
+# The tool keeps Fawry's language codes (no API change); the provider interface is neutral.
+_LANGUAGE: dict[str, Language] = {"en-gb": "en", "ar-eg": "ar"}
+
 ConfirmationToken = Annotated[
     str | None,
     Field(
@@ -199,6 +210,7 @@ class _Confirmation(BaseModel):
 class _Plan(BaseModel):
     """What a destructive tool will act on, worked out (and checked) before asking the human."""
 
+    payment: Payment  # fresh status, handed to the provider's cancel / refund
     reference_number: str
     payment_amount: Decimal
     amount: Decimal  # refund: the amount to refund; cancel: the amount that won't be collected
@@ -229,25 +241,25 @@ def _human_cairo(moment: datetime) -> str:
 
 
 @contextmanager
-def _fawry_errors(order_id: str, *, not_found: str | None = None) -> Iterator[None]:
+def _provider_errors(order_id: str, *, not_found: str | None = None) -> Iterator[None]:
     """Turn every anticipated failure into a ToolError the model can explain to the user."""
     try:
         yield
     except ConfigError as exc:
         raise ToolError(f"The payment server isn't configured: {exc}") from exc
-    except FawryError as exc:
-        if exc.status_code == 9938 and not_found:
+    except ProviderError as exc:
+        if exc.kind is ErrorKind.NOT_FOUND and not_found:
             raise ToolError(not_found) from exc
         raise ToolError(
-            f"Fawry refused the request (code {exc.status_code}): {exc.meaning}"
+            f"{exc.provider.capitalize()} refused the request (code {exc.code}): {exc.meaning}"
         ) from exc
-    except ResponseSignatureError as exc:
+    except ResponseVerificationError as exc:
         log.warning("order_id=%s: response signature check failed", order_id)
         raise ToolError(
             f"{exc} The answer can't be trusted, so it was ignored. Try again later; if it keeps "
             "happening, the server's FAWRY_SECURE_KEY may not match the merchant account."
         ) from exc
-    except FawryUnavailable as exc:
+    except ProviderUnavailable as exc:
         raise ToolError(
             f"{exc} Nothing was confirmed; it's safe to check the status again."
         ) from exc
@@ -287,7 +299,7 @@ def _confirmation_method(ctx: Context) -> str:
     return "asked the user directly" if _client_can_elicit(ctx) else "confirmation token"
 
 
-async def _refuse_duplicate(client: FawryClient, order_id: str) -> None:
+async def _refuse_duplicate(provider: PaymentProvider, order_id: str) -> None:
     """Refuse a second payment for an order_id (= Fawry's merchantRefNum) before charging.
 
     Our own check, so duplicate protection doesn't rest on Fawry's unverified behaviour (V8).
@@ -295,13 +307,13 @@ async def _refuse_duplicate(client: FawryClient, order_id: str) -> None:
     backstop for that.
     """
     try:
-        existing = await client.get_payment_status(order_id)
-    except FawryError as exc:
-        if exc.status_code == 9938:  # order not found: the order_id is free
+        existing = await provider.get_status(order_id)
+    except ProviderError as exc:
+        if exc.kind is ErrorKind.NOT_FOUND:  # the order_id is free
             return
         raise
     raise ToolError(
-        f"Order {order_id} already has a Fawry payment (reference {existing.reference_number}, "
+        f"Order {order_id} already has a Fawry payment (reference {existing.provider_ref}, "
         f"status {existing.status}). Nothing was created. Use get_payment_status to check it, "
         "or a new order_id for a new payment."
     )
@@ -316,7 +328,7 @@ def _status_summary(order_id: str, p: Payment) -> str:
         case "awaiting_payment":
             return (
                 f"Order {order_id} is not paid yet. The customer still needs to pay {total} EGP at "
-                f"a Fawry outlet with reference {p.reference_number}."
+                f"a Fawry outlet with reference {p.provider_ref}."
             )
         case "expired":
             return f"Order {order_id} expired unpaid. Create a new payment if the customer still wants to pay."
@@ -334,7 +346,9 @@ def _status_summary(order_id: str, p: Payment) -> str:
 # ----------------------------------------------------------------- server
 def create_server(
     *,
-    config_loader: Callable[[], FawryConfig] = load_config,
+    config_loader: Callable[[Mapping[str, str] | None], FawryConfig] = lambda headers: load_config(
+        headers=headers
+    ),
     transport: httpx2.AsyncBaseTransport | None = None,
     now: Callable[[], datetime] = lambda: datetime.now(UTC),
     confirm_secret: bytes | None = None,
@@ -369,11 +383,9 @@ def create_server(
         version=__version__,
     )
 
-    def client_and_env() -> tuple[FawryClient, str]:
-        config = config_loader()  # fresh every call: no credentials kept between calls
-        return FawryClient(
-            config.base_url, config.credentials, transport=transport
-        ), config.environment
+    def provider(ctx: Context) -> PaymentProvider:
+        # Fresh every call: no credentials kept between calls. ctx.headers is None over stdio.
+        return FawryProvider(config_loader(ctx.headers), transport=transport)
 
     # ------------------------------------------------------------ create
     @mcp.tool(
@@ -431,34 +443,37 @@ def create_server(
                 guardrails.check_payment_amount(amount_egp, payment_limit)
             except guardrails.GuardrailError as exc:
                 raise ToolError(str(exc)) from exc
-            with _fawry_errors(order_id):
-                client, environment = client_and_env()
-                await _refuse_duplicate(client, order_id)
-                payment = await client.create_pay_at_fawry_charge(
-                    merchant_ref_num=order_id,
-                    amount=amount_egp,
-                    customer_mobile=customer_mobile,
-                    customer_email=customer_email,
-                    description=description,
-                    language=language,
-                    customer_name=customer_name,
-                    payment_expiry=expires_at,
+            with _provider_errors(order_id):
+                fawry = provider(ctx)
+                environment = fawry.environment
+                await _refuse_duplicate(fawry, order_id)
+                payment = await fawry.create_payment(
+                    PaymentRequest(
+                        merchant_ref=order_id,
+                        amount=amount_egp,
+                        customer_mobile=customer_mobile,
+                        customer_email=customer_email,
+                        description=description,
+                        language=_LANGUAGE[language],
+                        customer_name=customer_name,
+                        expires_at=expires_at,
+                    )
                 )
             entry.update(raw_status=payment.raw_status, environment=environment)
         total = format_amount(payment.payment_amount)
         return CashPaymentCreated(
             order_id=order_id,
-            reference_number=payment.reference_number or "",
+            reference_number=payment.provider_ref or "",
             status=payment.status,
             raw_status=payment.raw_status,
             amount_egp=format_amount(payment.order_amount),
-            fawry_fees_egp=_egp(payment.fawry_fees),
+            fawry_fees_egp=_egp(payment.fees),
             total_to_pay_egp=total,
             expires_at_utc=_iso_utc(expires_at),
             expires_at_cairo=_iso_cairo(expires_at),
             customer_instructions=(
                 f"Please pay {total} EGP in cash at any Fawry outlet using reference number "
-                f"{payment.reference_number}, before {_human_cairo(expires_at)}."
+                f"{payment.provider_ref}, before {_human_cairo(expires_at)}."
             ),
             environment=environment,
         )
@@ -480,17 +495,18 @@ def create_server(
         """
         with (
             audited("get_payment_status", request_id=ctx.request_id, order_id=order_id) as entry,
-            _fawry_errors(
+            _provider_errors(
                 order_id,
                 not_found=f"No Fawry payment exists for order {order_id}. Check the order id, or create one.",
             ),
         ):
-            client, environment = client_and_env()
-            p = await client.get_payment_status(order_id)
+            fawry = provider(ctx)
+            environment = fawry.environment
+            p = await fawry.get_status(order_id)
             entry.update(raw_status=p.raw_status, environment=environment)
         return PaymentStatus(
             order_id=order_id,
-            reference_number=p.reference_number,
+            reference_number=p.provider_ref,
             status=p.status,
             raw_status=p.raw_status,
             is_paid=p.is_paid,
@@ -498,7 +514,7 @@ def create_server(
             paid_at_cairo=_iso_cairo(p.paid_at),
             amount_egp=format_amount(p.order_amount),
             total_to_pay_egp=format_amount(p.payment_amount),
-            fawry_fees_egp=_egp(p.fawry_fees),
+            fawry_fees_egp=_egp(p.fees),
             refunded_amount_egp=_egp(p.refunded_amount),
             summary=_status_summary(order_id, p),
             environment=environment,
@@ -549,12 +565,13 @@ def create_server(
             order_id=order_id,
             log_success=False,
         ):
-            with _fawry_errors(
+            with _provider_errors(
                 order_id,
                 not_found=f"No Fawry payment exists for order {order_id}, so there's nothing to cancel.",
             ):
-                client, environment = client_and_env()
-                before = await client.get_payment_status(order_id)
+                fawry = provider(ctx)
+                environment = fawry.environment
+                before = await fawry.get_status(order_id)
             if not before.is_awaiting_payment:
                 hint = " Use refund_payment instead." if before.is_paid else ""
                 raise ToolError(
@@ -562,7 +579,8 @@ def create_server(
                     f"({before.raw_status}).{hint} Nothing was changed."
                 )
             plan = _Plan(
-                reference_number=before.reference_number or "",
+                payment=before,
+                reference_number=before.provider_ref or "",
                 payment_amount=before.payment_amount,
                 amount=before.payment_amount,
                 status=before.status,
@@ -643,12 +661,11 @@ def create_server(
                     environment=plan.environment,
                 )
             _check_human_answer(answer)
-            with _fawry_errors(order_id):
-                client, environment = client_and_env()
-                await client.cancel_unpaid(
-                    reference_number=plan.reference_number, language=language
-                )
-                after = await client.get_payment_status(order_id)
+            with _provider_errors(order_id):
+                fawry = provider(ctx)
+                environment = fawry.environment
+                await fawry.cancel(plan.payment, language=_LANGUAGE[language])
+                after = await fawry.get_status(order_id)
             entry.update(raw_status=after.raw_status, environment=environment)
         return CancelResult(
             **common,
@@ -685,12 +702,13 @@ def create_server(
             amount=amount_egp,
             log_success=False,
         ):
-            with _fawry_errors(
+            with _provider_errors(
                 order_id,
                 not_found=f"No Fawry payment exists for order {order_id}, so there's nothing to refund.",
             ):
-                client, environment = client_and_env()
-                before = await client.get_payment_status(order_id)
+                fawry = provider(ctx)
+                environment = fawry.environment
+                before = await fawry.get_status(order_id)
             if before.status == "refunded":
                 raise ToolError(
                     f"Order {order_id} was already refunded; Fawry allows one refund per payment. "
@@ -709,7 +727,8 @@ def create_server(
             except guardrails.GuardrailError as exc:
                 raise ToolError(str(exc)) from exc
             plan = _Plan(
-                reference_number=before.reference_number or "",
+                payment=before,
+                reference_number=before.provider_ref or "",
                 payment_amount=before.payment_amount,
                 amount=amount,
                 status=before.status,
@@ -799,12 +818,11 @@ def create_server(
                     environment=plan.environment,
                 )
             _check_human_answer(answer)
-            with _fawry_errors(order_id):
-                client, environment = client_and_env()
-                await client.refund(
-                    reference_number=plan.reference_number, amount=amount, reason=reason
-                )
-                after = await client.get_payment_status(order_id)
+            with _provider_errors(order_id):
+                fawry = provider(ctx)
+                environment = fawry.environment
+                await fawry.refund(plan.payment, amount=amount, reason=reason)
+                after = await fawry.get_status(order_id)
             entry.update(raw_status=after.raw_status, environment=environment)
         return RefundResult(
             **common,
