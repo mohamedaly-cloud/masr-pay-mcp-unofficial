@@ -1,7 +1,6 @@
 # Decisions ("Why" log)
 
-Short, plain-English reasons for the non-obvious choices, so each one can be defended in a
-review or an interview. Newest milestone first.
+Short, plain-English reasons for the non-obvious choices. Newest milestone first.
 
 ## Milestone 3: AWS deploy
 
@@ -12,7 +11,7 @@ review or an interview. Newest milestone first.
   and the signature failure and network errors become their neutral twins. `FawryClient` is
   untouched and keeps the wire format.
 - **Why now:** adding InstaPay via Kashier (on hold) becomes "write `providers/kashier/`", with
-  no rewrite of the tools, which is the architecture docs/design.md asks for. It was done first in
+  no rewrite of the tools, which is the architecture design.md asks for. It was done first in
   milestone 3 so the Lambda handler is built against the final shape.
 - **No API change.** The tools still take Fawry's `en-gb`/`ar-eg` language codes, mapped to the
   neutral `en`/`ar` at the edge. All 180 tests passed unchanged.
@@ -132,7 +131,7 @@ The feature was built and tested on the `notifications` branch (16 tests), then 
   wrappers. The provider's system is the database, and notifications go to the merchant's own
   backend, not to the MCP server. The feature adds a database and a webhook surface for a
   nice-to-have, since `get_payment_status` already answers "did Ahmed pay?". A v1 that stores
-  nothing at all is the stronger product promise, and easier to defend.
+  nothing at all is the stronger product promise, and easier to explain.
 - **When to revisit:** if merchants ask for it, or when MCP gets server-to-client push that works
   on Lambda. Then it might not need a table at all. Merging the branch needs rule 2 amended first.
 
@@ -157,7 +156,7 @@ The feature was built and tested on the `notifications` branch (16 tests), then 
 
 ### SDK and dependencies
 - **Official MCP Python SDK 2.3 (`mcp>=2.3,<3`), class `MCPServer`.** Answers the open question
-  in docs/design.md: v2 imports are `from mcp.server import MCPServer` and `from mcp import Client`.
+  in design.md: v2 imports are `from mcp.server import MCPServer` and `from mcp import Client`.
   FastMCP was folded into the official SDK and renamed `MCPServer`, so there's no separate
   FastMCP to evaluate. The SDK lists `2026-07-28` as its modern (stateless) protocol and still
   negotiates older revisions with clients that need them.
@@ -213,7 +212,7 @@ The feature was built and tested on the `notifications` branch (16 tests), then 
 ### Human confirmation for cancel and refund (rule 4)
 Three layers. Each one alone can be bypassed; together they are hard to get wrong:
 1. **`destructiveHint: true`** makes MCP hosts show their own approval prompt.
-2. **Two-step HMAC confirmation token** (docs/design.md "Security and trust" #1). Call 1 without a
+2. **Two-step HMAC confirmation token** (design.md "Security and trust" #1). Call 1 without a
    token changes nothing: it returns a preview and a token. Call 2 with the same arguments plus
    the token does the action. The token is `<expiry>.<HMAC-SHA256(secret, tool + exact args +
    expiry)>`, valid 5 minutes. It replaced an earlier `confirmed_by_user: bool` flag:
@@ -291,7 +290,7 @@ confirmation was obtained (`asked the user directly` or `confirmation token`).
 - **The refund cap moved to `core/guardrails.py`.** Same rule as before (≤ order amount, V6), but
   now provider-neutral and unit-tested on its own.
 - **`merchantRefNum` is the merchant's `order_id`, not a server-generated value (decided
-  2026-10-31; docs/design.md updated).** The original plan was a server-generated unique reference.
+  2026-10-31; design.md updated).** The original plan was a server-generated unique reference.
   In a stateless server (no database, rule 2), a generated reference couldn't be found again
   from "did Ahmed pay for order 42?" without storing a mapping. Options considered:
   - *Random generated reference:* needs a database. Rejected (rule 2).
@@ -322,15 +321,15 @@ and email, and anything shaped like a 64-hex signature. That **found a real leak
 each request URL at INFO, and the status v2 URL carries `?signature=…`. The redacting filter missed
 it because `httpx2` passes the URL as a `URL` object, not a `str`. Fixed twice over: the filter now
 redacts any non-numeric argument through its string form (with a regression test using a real
-`httpx2.URL`), and `httpx2`/`httpcore2` loggers are set to WARNING. A re-run found zero leaks. Lesson
-for interviews: redaction needs an end-to-end check against real log output, not just unit tests.
+`httpx2.URL`), and `httpx2`/`httpcore2` loggers are set to WARNING. A re-run found zero leaks. The
+lesson: redaction needs an end-to-end check against real log output, not just unit tests.
 
 ### Not done in milestone 2 (on purpose)
 - **HTTP transport and per-request credentials from headers:** done in milestone 3 (above).
 
 ## Milestone 1: mock, signatures, tests
 
-### Dependencies outside the stack table (awaiting director approval)
+### Dependencies outside the stack table
 | Package | Used for | Why it's needed |
 |---|---|---|
 | `uvicorn` | Running the FastAPI mock locally (`python -m mock_fawry`) | FastAPI is only a framework; something has to serve HTTP. Uvicorn is the server FastAPI documents. On Lambda (milestone 3) it won't be used. |
@@ -349,7 +348,7 @@ switching to `httpx2`.
   `printf '%s' "$plain" | sha256sum`. If the vectors were generated with `signatures.py`, the
   tests would only check that the code agrees with itself. Fawry's doc sample signatures
   aren't used because they're placeholders, not hashes of the sample inputs: the same value
-  appears on pages with different inputs (see docs/design.md, "Known traps"). The documented formula
+  appears on pages with different inputs (see design.md, "Known traps"). The documented formula
   hasn't been shown to be wrong. Re-check against real sandbox responses once we have credentials.
 - **Amounts: `Decimal`, never round.** `format_amount` rejects anything with more than two
   decimals instead of rounding. The signed amount must equal the amount in the body, so a

@@ -61,6 +61,7 @@ scripts/smoke_remote.py                    the same story against the deployed s
 infra/template.yaml                        SAM: Lambda + API Gateway, secret, logs, IAM
 infra/ci-bootstrap.yaml                    one-time: GitHub OIDC deploy role, boundary, bucket
 .github/workflows/ci.yml                   lint, tests, pip-audit, cfn-lint; deploy on main
+docs/design.md                             what it is, the rules, and the Fawry API reference
 docs/decisions.md                          why things are the way they are, plus the "verify" list
 docs/threat-model.md                       threats and the code that mitigates each
 docs/inspector.md                          MCP Inspector walkthrough
