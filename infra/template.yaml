@@ -1,0 +1,208 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >-
+  masr-pay-mcp-unofficial: unofficial MCP server for FawryPay cash payments (not affiliated with
+  Fawry), plus a mock of Fawry's API for public demos. Lambda + API Gateway HTTP APIs.
+
+# Deploy it with the CloudFormation role from infra/ci-bootstrap.yaml (deploy that stack first);
+# that role only creates IAM roles that carry the masr-pay-mcp-boundary permissions boundary.
+
+Parameters:
+  FawryEnv:
+    Type: String
+    Default: mock
+    AllowedValues: [mock, staging, production]
+    Description: Which Fawry the MCP server talks to. "mock" uses the mock deployed in this stack.
+  EnableDestructiveTools:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: >-
+      Expose refund_payment and cancel_unpaid_payment. Only for assistants the merchant's own
+      staff use (docs/threat-model.md, T10).
+  MaxRefundEgp:
+    Type: Number
+    Default: 2000
+    MinValue: 1
+  LogRetentionDays:
+    Type: Number
+    Default: 30
+    AllowedValues: [7, 14, 30, 60, 90, 180, 365]
+
+Conditions:
+  UseMock: !Equals [!Ref FawryEnv, mock]
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Architectures: [x86_64]
+    MemorySize: 512
+    Timeout: 28 # API Gateway HTTP APIs give up at 30 s
+    Layers:
+      # AWS Lambda Web Adapter: API Gateway events in, plain HTTP to our uvicorn server out.
+      - !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:753240598075:layer:LambdaAdapterLayerX86:30
+    Environment:
+      Variables:
+        AWS_LAMBDA_EXEC_WRAPPER: /opt/bootstrap
+        AWS_LWA_PORT: "8080"
+
+Resources:
+  # ------------------------------------------------------------------ shared secret
+  ConfirmSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub ${AWS::StackName}/confirm-secret
+      Description: HMAC key for refund/cancel confirmation tokens, shared by all Lambda instances.
+      GenerateSecretString:
+        PasswordLength: 64
+        ExcludePunctuation: true
+
+  # ------------------------------------------------------------------ MCP server
+  McpLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /masr-pay-mcp/${AWS::StackName}/mcp
+      RetentionInDays: !Ref LogRetentionDays
+
+  McpRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${AWS::StackName}-fn-mcp-${AWS::Region}
+      PermissionsBoundary: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/masr-pay-mcp-boundary
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals: { aws:SourceAccount: !Ref AWS::AccountId }
+      Policies:
+        - PolicyName: least-privilege
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow # write to its own log group, nothing else
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !Sub ${McpLogGroup.Arn}
+              - Effect: Allow # read the one secret it needs
+                Action: secretsmanager:GetSecretValue
+                Resource: !Ref ConfirmSecret
+
+  McpFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
+    Properties:
+      Description: masr-pay-mcp-unofficial MCP server (Streamable HTTP, stateless)
+      CodeUri: ../
+      Handler: run-mcp.sh
+      Role: !GetAtt McpRole.Arn
+      LoggingConfig:
+        LogGroup: !Ref McpLogGroup
+        LogFormat: Text # each audit line is already one JSON object
+      Environment:
+        Variables:
+          FAWRY_ENV: !Ref FawryEnv
+          FAWRY_BASE_URL: !If
+            - UseMock
+            - !Sub https://${MockApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}
+            - "" # empty: the official URL for FAWRY_ENV
+          MASR_PAY_CONFIRM_SECRET_ARN: !Ref ConfirmSecret
+          MASR_PAY_ENABLE_DESTRUCTIVE_TOOLS: !Ref EnableDestructiveTools
+          MASR_PAY_MAX_REFUND_EGP: !Ref MaxRefundEgp
+      Events:
+        Mcp:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref McpApi
+            Path: /mcp
+            Method: ANY
+
+  McpAccessLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /masr-pay-mcp/${AWS::StackName}/mcp-access
+      RetentionInDays: !Ref LogRetentionDays
+
+  McpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      Description: MCP endpoint (POST /mcp)
+      DefaultRouteSettings: # per-stage throttle: caps cost and abuse, protects the account's Lambda concurrency
+        ThrottlingRateLimit: 5
+        ThrottlingBurstLimit: 10
+      AccessLogSettings:
+        DestinationArn: !GetAtt McpAccessLogGroup.Arn
+        # No headers: they carry the merchant's secure key.
+        Format: '{"requestId":"$context.requestId","ip":"$context.identity.sourceIp","time":"$context.requestTime","route":"$context.routeKey","status":"$context.status","latencyMs":"$context.responseLatency","error":"$context.integrationErrorMessage"}'
+
+  # ------------------------------------------------------------------ mock Fawry (fake money only)
+  MockLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /masr-pay-mcp/${AWS::StackName}/mock
+      RetentionInDays: 7
+
+  MockRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${AWS::StackName}-fn-mock-${AWS::Region}
+      PermissionsBoundary: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/masr-pay-mcp-boundary
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals: { aws:SourceAccount: !Ref AWS::AccountId }
+      Policies:
+        - PolicyName: least-privilege
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !Sub ${MockLogGroup.Arn}
+
+  MockFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
+    Properties:
+      # shortcut: orders live in this instance's memory, so a second concurrent instance (or a
+      # cold start) starts empty. Fine for a demo; a shared demo store would need DynamoDB.
+      Description: Mock of Fawry's API for demos (fake merchant, fake money, in-memory orders)
+      CodeUri: ../
+      Handler: run-mock.sh
+      Role: !GetAtt MockRole.Arn
+      MemorySize: 256
+      LoggingConfig:
+        LogGroup: !Ref MockLogGroup
+      Events:
+        Mock:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref MockApi
+            Path: /{proxy+}
+            Method: ANY
+
+  MockApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      Description: Mock Fawry API for demos (separate API, so the MCP function can reference its URL)
+      DefaultRouteSettings: # each MCP tool call makes up to two calls to the mock
+        ThrottlingRateLimit: 10
+        ThrottlingBurstLimit: 20
+
+Outputs:
+  McpUrl:
+    Description: Point MCP clients here (Streamable HTTP), with X-Fawry-Merchant-Code and X-Fawry-Secure-Key headers.
+    Value: !Sub https://${McpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/mcp
+  MockUrl:
+    Description: The demo mock (POST /__admin/kiosk-pay/{referenceNumber} simulates a cash payment).
+    Value: !Sub https://${MockApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}
+  AuditLogGroup:
+    Description: One JSON audit line per tool call.
+    Value: !Ref McpLogGroup

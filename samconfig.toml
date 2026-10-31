@@ -1,0 +1,23 @@
+# sam build / sam deploy defaults. Deploying needs the CI bootstrap stack (infra/ci-bootstrap.yaml);
+# CI passes --role-arn and --s3-bucket from its outputs.
+version = 0.1
+
+[default.global.parameters]
+stack_name = "masr-pay-mcp"
+region = "eu-west-1"
+
+# Only build and validate read the source template. deploy must use the built one
+# (.aws-sam/build/template.yaml, sam's default); pointing it at the source would upload the repo.
+[default.validate.parameters]
+template_file = "infra/template.yaml"
+
+[default.build.parameters]
+template_file = "infra/template.yaml"
+build_in_source = true # don't copy .venv into a temp dir; the Makefile only reads the package
+
+[default.deploy.parameters]
+capabilities = "CAPABILITY_NAMED_IAM"
+confirm_changeset = false
+fail_on_empty_changeset = false
+# The public demo: talks to the mock, refunds on so the confirmation flow can be shown.
+parameter_overrides = "FawryEnv=mock EnableDestructiveTools=true"

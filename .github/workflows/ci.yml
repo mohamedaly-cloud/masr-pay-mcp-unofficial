@@ -1,0 +1,80 @@
+# Every push and PR: lint, tests, dependency audit, template checks.
+# Push to main: also deploy with SAM through GitHub OIDC (no AWS keys stored in GitHub), then
+# smoke-test the live stack.
+#
+# Repo variables (Settings > Secrets and variables > Actions > Variables), from the outputs of
+# the masr-pay-mcp-ci stack (infra/ci-bootstrap.yaml):
+#   AWS_DEPLOY_ROLE_ARN, AWS_CLOUDFORMATION_ROLE_ARN, AWS_ARTIFACT_BUCKET
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.12"
+  AWS_REGION: eu-west-1
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      # Actions are pinned to commit SHAs: a moved tag can't change what runs here.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install (runtime pinned by infra/constraints.txt, tools pinned here)
+        run: |
+          python -m pip install --upgrade pip==26.2.2
+          pip install --constraint infra/constraints.txt -e ".[mock]" \
+            pytest==9.2.0 ruff==0.17.3 pip-audit==2.10.1 cfn-lint==1.58.0
+      - run: ruff check .
+      - run: ruff format --check .
+      - run: pytest
+      - name: pip-audit (everything installed here, which includes what Lambda runs)
+        run: pip-audit --skip-editable
+      - name: Templates
+        run: cfn-lint infra/template.yaml infra/ci-bootstrap.yaml
+
+  deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: check
+    runs-on: ubuntu-24.04
+    # No `environment:` here: it would change the OIDC subject the AWS role trusts (ref main).
+    concurrency: deploy # one deploy at a time; never cancel one halfway
+    permissions:
+      contents: read
+      id-token: write # lets the job ask GitHub for an OIDC token to assume the AWS role
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: aws-actions/setup-sam@341eee193f458fa5aae5d52c94b0c5cf3a1c5a52 # v3
+        with:
+          version: 1.171.0
+          use-installer: true
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - run: sam build
+        env:
+          SAM_CLI_TELEMETRY: "0"
+      - name: sam deploy (CloudFormation acts with the narrow CloudFormation role)
+        run: >-
+          sam deploy --no-progressbar
+          --role-arn "${{ vars.AWS_CLOUDFORMATION_ROLE_ARN }}"
+          --s3-bucket "${{ vars.AWS_ARTIFACT_BUCKET }}" --s3-prefix masr-pay-mcp
+        env:
+          SAM_CLI_TELEMETRY: "0"
+      - name: Smoke test the live stack
+        run: |
+          pip install --constraint infra/constraints.txt -e ".[mock]"
+          outputs() { aws cloudformation describe-stacks --stack-name masr-pay-mcp \
+            --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue" --output text; }
+          python scripts/smoke_remote.py "$(outputs McpUrl)" "$(outputs MockUrl)"

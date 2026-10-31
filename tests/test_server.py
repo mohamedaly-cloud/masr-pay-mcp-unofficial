@@ -29,7 +29,7 @@ CREATE_ARGS = {
 def server(config, transport, clock):
     """A merchant-operated server: refunds and cancellations enabled."""
     return create_server(
-        config_loader=lambda: config,
+        config_loader=lambda _headers: config,
         transport=transport,
         now=clock.now,
         enable_destructive_tools=True,
@@ -77,7 +77,9 @@ async def test_lists_four_tools_with_safety_annotations(server):
 
 async def test_refund_and_cancel_are_hidden_unless_enabled(config, transport, clock):
     """Default: a customer-facing bot can create and check payments, nothing else."""
-    server = create_server(config_loader=lambda: config, transport=transport, now=clock.now)
+    server = create_server(
+        config_loader=lambda _headers: config, transport=transport, now=clock.now
+    )
     async with Client(server) as client:
         names = {t.name for t in (await client.list_tools()).tools}
         result = await call(client, "refund_payment", {"order_id": "42", "reason": "x"})
@@ -154,7 +156,7 @@ class _CountCharges(httpx2.AsyncBaseTransport):
 
 async def test_duplicate_order_id_is_refused_before_charging(config, transport, clock):
     counting = _CountCharges(transport)
-    server = create_server(config_loader=lambda: config, transport=counting, now=clock.now)
+    server = create_server(config_loader=lambda _headers: config, transport=counting, now=clock.now)
     async with Client(server) as client:
         ref = (await create(client))["reference_number"]
         result = await call(client, "create_cash_payment", {**CREATE_ARGS, "amount_egp": 999})
@@ -173,7 +175,7 @@ async def test_bad_credentials_explain_what_to_fix(config, transport, clock):
     from masr_pay_mcp.providers.fawry.config import Credentials, FawryConfig
 
     bad = FawryConfig(config.base_url, "mock", Credentials(MERCHANT, "wrong-key"))
-    server = create_server(config_loader=lambda: bad, transport=transport, now=clock.now)
+    server = create_server(config_loader=lambda _headers: bad, transport=transport, now=clock.now)
     async with Client(server) as client:
         result = await call(client, "create_cash_payment", CREATE_ARGS)
     text = error_text(result)
@@ -182,7 +184,7 @@ async def test_bad_credentials_explain_what_to_fix(config, transport, clock):
 
 
 async def test_missing_config_is_reported(transport):
-    def broken():
+    def broken(_headers):
         raise ConfigError("Missing FAWRY_SECURE_KEY.")
 
     server = create_server(config_loader=broken, transport=transport)
@@ -379,7 +381,7 @@ async def test_expired_token_is_refused(server, mock_app, clock):
 async def test_token_from_another_server_secret_is_refused(config, transport, clock, mock_app):
     def make(secret):
         return create_server(
-            config_loader=lambda: config,
+            config_loader=lambda _headers: config,
             transport=transport,
             now=clock.now,
             confirm_secret=secret,
@@ -481,7 +483,7 @@ async def test_payment_above_the_limit_is_refused_before_calling_fawry(server, m
 
 async def test_payment_limit_is_configurable(config, transport, clock, mock_app):
     server = create_server(
-        config_loader=lambda: config,
+        config_loader=lambda _headers: config,
         transport=transport,
         now=clock.now,
         max_payment_egp=Decimal("100"),
@@ -494,7 +496,7 @@ async def test_payment_limit_is_configurable(config, transport, clock, mock_app)
 
 async def test_refund_above_the_refund_limit_is_refused(config, transport, clock, mock_app):
     server = create_server(
-        config_loader=lambda: config,
+        config_loader=lambda _headers: config,
         transport=transport,
         now=clock.now,
         enable_destructive_tools=True,
@@ -543,7 +545,7 @@ async def test_audit_records_fawry_error_code(config, transport, clock, caplog):
 
     caplog.set_level(logging.INFO, logger="masr_pay_mcp.audit")
     bad = FawryConfig(config.base_url, "mock", Credentials(MERCHANT, "wrong-key"))
-    server = create_server(config_loader=lambda: bad, transport=transport, now=clock.now)
+    server = create_server(config_loader=lambda _headers: bad, transport=transport, now=clock.now)
     async with Client(server) as client:
         await call(client, "create_cash_payment", CREATE_ARGS)
     (line,) = audit_lines(caplog)
@@ -568,9 +570,11 @@ class _ForgePaid(httpx2.AsyncBaseTransport):
 
 
 async def test_spoofed_paid_status_is_never_reported_as_paid(config, transport, clock):
-    honest = create_server(config_loader=lambda: config, transport=transport, now=clock.now)
+    honest = create_server(
+        config_loader=lambda _headers: config, transport=transport, now=clock.now
+    )
     forged = create_server(
-        config_loader=lambda: config, transport=_ForgePaid(transport), now=clock.now
+        config_loader=lambda _headers: config, transport=_ForgePaid(transport), now=clock.now
     )
     async with Client(honest) as a, Client(forged) as b:
         await create(a)
