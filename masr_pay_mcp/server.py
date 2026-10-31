@@ -24,8 +24,8 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 from pydantic import AfterValidator, BaseModel, BeforeValidator, Field
 
-from fawry_mcp import __version__
-from fawry_mcp.client import (
+from masr_pay_mcp import __version__
+from masr_pay_mcp.providers.fawry.client import (
     FawryClient,
     FawryError,
     FawryUnavailable,
@@ -33,8 +33,8 @@ from fawry_mcp.client import (
     Payment,
     ResponseSignatureError,
 )
-from fawry_mcp.config import ConfigError, FawryConfig, load_config
-from fawry_mcp.signatures import format_amount
+from masr_pay_mcp.providers.fawry.config import ConfigError, FawryConfig, load_config
+from masr_pay_mcp.providers.fawry.signatures import format_amount
 
 log = logging.getLogger(__name__)
 
@@ -304,9 +304,9 @@ def create_server(
 ) -> MCPServer:
     """Build the MCP server. The keyword arguments exist so tests can point it at the mock."""
     mcp = MCPServer(
-        name="fawry-mcp-unofficial",
-        title="FawryPay cash payments (unofficial)",
-        description="Unofficial MCP server for FawryPay Pay-at-Fawry. Not affiliated with Fawry.",
+        name="masr-pay-mcp-unofficial",
+        title="Egyptian payments: FawryPay cash (unofficial)",
+        description="Unofficial MCP server for Egyptian payment providers, starting with FawryPay Pay-at-Fawry. Not affiliated with Fawry.",
         instructions=SERVER_INSTRUCTIONS,
         version=__version__,
     )

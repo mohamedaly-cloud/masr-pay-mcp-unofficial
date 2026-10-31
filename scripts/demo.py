@@ -58,7 +58,7 @@ def show(title: str, data: dict) -> None:
 async def run(mock_url: str) -> None:
     server = StdioServerParameters(
         command=sys.executable,
-        args=["-m", "fawry_mcp"],
+        args=["-m", "masr_pay_mcp"],
         env={
             **os.environ,
             "FAWRY_ENV": "mock",

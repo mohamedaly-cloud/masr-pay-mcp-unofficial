@@ -30,7 +30,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
-from fawry_mcp import signatures as sig
+from masr_pay_mcp.providers.fawry import signatures as sig
 from mock_fawry.state import (
     PAID,
     REFUNDED,
@@ -198,7 +198,7 @@ def create_app(settings: MockSettings | None = None) -> FastAPI:
     app = FastAPI(
         title="Mock FawryPay API (unofficial)",
         description=(
-            "Development mock of the FawryPay staging API, part of fawry-mcp-unofficial. "
+            "Development mock of the FawryPay staging API, part of masr-pay-mcp-unofficial. "
             "Not Fawry, not affiliated with or endorsed by Fawry. No real money moves."
         ),
         version="0.1.0",

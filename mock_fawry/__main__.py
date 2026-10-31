@@ -18,7 +18,9 @@ from mock_fawry.app import DEFAULT_SECURE_KEY, create_app
 
 def redacted_log_config() -> dict:
     config = copy.deepcopy(LOGGING_CONFIG)
-    config.setdefault("filters", {})["redact"] = {"()": "fawry_mcp.redaction.RedactingFilter"}
+    config.setdefault("filters", {})["redact"] = {
+        "()": "masr_pay_mcp.core.redaction.RedactingFilter"
+    }
     for handler in config["handlers"].values():
         handler.setdefault("filters", []).append("redact")
     return config

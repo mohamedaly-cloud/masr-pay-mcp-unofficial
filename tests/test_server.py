@@ -4,10 +4,9 @@ import mcp.types as types
 import pytest
 from mcp import Client
 
-from fawry_mcp.config import ConfigError
-from fawry_mcp.server import create_server
-
-from .conftest import HOUR_MS, MERCHANT
+from masr_pay_mcp.providers.fawry.config import ConfigError
+from masr_pay_mcp.server import create_server
+from tests.conftest import HOUR_MS, MERCHANT
 
 pytestmark = pytest.mark.anyio
 
@@ -137,7 +136,7 @@ async def test_status_of_unknown_order(server):
 
 
 async def test_bad_credentials_explain_what_to_fix(config, transport, clock):
-    from fawry_mcp.config import Credentials, FawryConfig
+    from masr_pay_mcp.providers.fawry.config import Credentials, FawryConfig
 
     bad = FawryConfig(config.base_url, "mock", Credentials(MERCHANT, "wrong-key"))
     server = create_server(config_loader=lambda: bad, transport=transport, now=clock.now)

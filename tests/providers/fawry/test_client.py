@@ -7,16 +7,15 @@ from decimal import Decimal
 import httpx2
 import pytest
 
-from fawry_mcp import signatures as sig
-from fawry_mcp.client import (
+from masr_pay_mcp.providers.fawry import signatures as sig
+from masr_pay_mcp.providers.fawry.client import (
     FawryClient,
     FawryError,
     FawryUnavailable,
     ResponseSignatureError,
 )
-from fawry_mcp.config import Credentials
-
-from .conftest import HOUR_MS, KEY, MERCHANT, T0
+from masr_pay_mcp.providers.fawry.config import Credentials
+from tests.conftest import HOUR_MS, KEY, MERCHANT, T0
 
 BASE = "http://mock-fawry"
 pytestmark = pytest.mark.anyio

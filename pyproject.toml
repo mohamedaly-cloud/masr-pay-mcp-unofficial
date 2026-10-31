@@ -1,7 +1,7 @@
 [project]
-name = "fawry-mcp-unofficial"
+name = "masr-pay-mcp-unofficial"
 version = "0.1.0"
-description = "Unofficial MCP server for FawryPay (Pay-at-Fawry cash payments). Not affiliated with or endorsed by Fawry."
+description = "Unofficial MCP server for Egyptian payment providers, starting with FawryPay (Pay-at-Fawry cash payments). Not affiliated with or endorsed by any provider."
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
@@ -11,13 +11,13 @@ dependencies = [
 ]
 
 [project.scripts]
-fawry-mcp-unofficial = "fawry_mcp.__main__:main"
+masr-pay-mcp-unofficial = "masr_pay_mcp.__main__:main"
 
 [project.optional-dependencies]
 # The mock Fawry API (FastAPI app + ASGI server to run it locally).
 mock = ["fastapi>=0.115", "uvicorn>=0.30"]
 dev = [
-    "fawry-mcp-unofficial[mock]",
+    "masr-pay-mcp-unofficial[mock]",
     "pytest>=8",
     "ruff>=0.6",
 ]
@@ -27,7 +27,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["fawry_mcp", "mock_fawry"]
+packages = ["masr_pay_mcp", "mock_fawry"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

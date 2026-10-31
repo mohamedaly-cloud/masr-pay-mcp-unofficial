@@ -1,4 +1,4 @@
-"""Run the MCP server over stdio: ``python -m fawry_mcp`` (or ``fawry-mcp-unofficial``).
+"""Run the MCP server over stdio: ``python -m masr_pay_mcp`` (or ``masr-pay-mcp-unofficial``).
 
 stdout belongs to the MCP protocol, so logs go to stderr, through the
 redacting filter.
@@ -10,8 +10,8 @@ import logging
 import os
 import sys
 
-from fawry_mcp.redaction import RedactingFilter
-from fawry_mcp.server import create_server
+from masr_pay_mcp.core.redaction import RedactingFilter
+from masr_pay_mcp.server import create_server
 
 
 def configure_logging() -> None:

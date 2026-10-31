@@ -7,8 +7,8 @@ import pytest
 from fastapi.testclient import TestClient
 from uvicorn.logging import AccessFormatter
 
-from fawry_mcp import signatures as sig
-from fawry_mcp.redaction import RedactingFilter
+from masr_pay_mcp.core.redaction import RedactingFilter
+from masr_pay_mcp.providers.fawry import signatures as sig
 from mock_fawry.__main__ import redacted_log_config
 from mock_fawry.app import (
     CANCEL_UNPAID_PATH,
@@ -443,7 +443,7 @@ def test_milestone_demo_flow(client):
 # ------------------------------------------------------------------ logging
 def test_runner_log_config_redacts_on_every_handler():
     config = redacted_log_config()
-    assert config["filters"]["redact"]["()"] == "fawry_mcp.redaction.RedactingFilter"
+    assert config["filters"]["redact"]["()"] == "masr_pay_mcp.core.redaction.RedactingFilter"
     assert all("redact" in h["filters"] for h in config["handlers"].values())
 
 

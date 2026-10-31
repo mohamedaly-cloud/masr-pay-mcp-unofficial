@@ -1,6 +1,6 @@
 import pytest
 
-from fawry_mcp.config import BASE_URLS, ConfigError, load_config
+from masr_pay_mcp.providers.fawry.config import BASE_URLS, ConfigError, load_config
 
 CREDS = {"FAWRY_MERCHANT_CODE": "M1", "FAWRY_SECURE_KEY": "secret-key-value"}
 

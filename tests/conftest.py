@@ -6,7 +6,7 @@ from decimal import Decimal
 import httpx2
 import pytest
 
-from fawry_mcp.config import Credentials, FawryConfig
+from masr_pay_mcp.providers.fawry.config import Credentials, FawryConfig
 from mock_fawry.app import MockSettings, create_app
 
 MERCHANT = "TESTMERCHANT01"

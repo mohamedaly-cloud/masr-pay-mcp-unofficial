@@ -1,6 +1,6 @@
 import logging
 
-from fawry_mcp.redaction import MASK, RedactingFilter, redact_mapping, redact_text
+from masr_pay_mcp.core.redaction import MASK, RedactingFilter, redact_mapping, redact_text
 
 SIG = "a" * 64
 

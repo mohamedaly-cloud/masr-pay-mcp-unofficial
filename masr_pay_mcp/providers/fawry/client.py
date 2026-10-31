@@ -21,8 +21,8 @@ from typing import Any, Literal
 
 import httpx2
 
-from fawry_mcp import signatures as sig
-from fawry_mcp.config import Credentials
+from masr_pay_mcp.providers.fawry import signatures as sig
+from masr_pay_mcp.providers.fawry.config import Credentials
 
 log = logging.getLogger(__name__)
 

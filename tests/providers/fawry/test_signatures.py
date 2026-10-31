@@ -4,9 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from fawry_mcp import signatures as sig
+from masr_pay_mcp.providers.fawry import signatures as sig
 
-VECTORS_FILE = json.loads((Path(__file__).parent / "vectors.json").read_text(encoding="utf-8"))
+VECTORS_FILE = json.loads((Path(__file__).parents[2] / "vectors.json").read_text(encoding="utf-8"))
 SECURE_KEY = VECTORS_FILE["secure_key"]
 VECTORS = VECTORS_FILE["vectors"]
 
