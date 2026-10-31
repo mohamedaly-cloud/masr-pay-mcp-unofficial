@@ -116,6 +116,33 @@ review or an interview. Newest milestone first.
   preview → refund with token → no headers refused). The CloudWatch logs had 0 hits for the
   secure key or the customer mobile.
 
+### Payment notifications: built, then parked (decided 2026-10-31)
+The goal was to let the assistant answer "who paid today?" without being given order numbers.
+The feature was built and tested on the `notifications` branch (16 tests), then deliberately
+**not shipped in v1**.
+- **The design problem:** to check a Fawry notification's own signature, the server needs the
+  merchant's secure key on hand when the notification arrives. That means storing it, which
+  rule 2 forbids.
+- **The design:** treat the notification as an **untrusted hint**. Each charge carries an
+  `orderWebHookUrl` with an HMAC, so only URLs this server minted are accepted. Only merchant
+  code, order id and time are kept (DynamoDB, 7-day TTL); no customer data, amounts or keys.
+  A read-only tool re-checks every hinted order with Fawry, using the caller's own credentials
+  and the signed status call. A forged hint costs one extra status check and changes no answer.
+- **Why it was parked:** payment MCP servers (Stripe, PayPal and the like) are thin, stateless
+  wrappers. The provider's system is the database, and notifications go to the merchant's own
+  backend, not to the MCP server. The feature adds a database and a webhook surface for a
+  nice-to-have, since `get_payment_status` already answers "did Ahmed pay?". A v1 that stores
+  nothing at all is the stronger product promise, and easier to defend.
+- **When to revisit:** if merchants ask for it, or when MCP gets server-to-client push that works
+  on Lambda. Then it might not need a table at all. Merging the branch needs rule 2 amended first.
+
+### Not in v1: merchant sign-in (OAuth)
+- Sign-in only helps merchants if it replaces pasting the Fawry key, and that means storing the
+  key (against rule 2). That would also make the server a target holding many merchants' payment keys.
+- MCP clients expect to register with the sign-in service automatically. Cognito doesn't
+  support that the way MCP expects, so it would need another provider or custom code.
+- Revisit after launch, if merchants ask for it.
+
 ### The public mock
 - **Deployed in the same stack, for demos** (fake merchant, fake money). The demo credentials are
   public on purpose: they're the mock's built-in defaults.
