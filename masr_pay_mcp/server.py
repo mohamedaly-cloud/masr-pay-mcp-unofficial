@@ -52,7 +52,7 @@ Typical flow:
 1. create_cash_payment: get a 9-digit Fawry reference number for an order. Give the customer the
    reference number, the total to pay in EGP and the deadline. They pay cash at any Fawry outlet.
 2. get_payment_status: check whether the customer has paid. Look it up by the same order_id.
-3. cancel_unpaid_payment / refund_payment: destructive, two steps. Call once without
+3. cancel_unpaid_payment / refund_payment (only if the merchant enabled them): destructive, two steps. Call once without
    confirmation_token to get a preview and a token. Show the preview to the human. Only if they
    explicitly say yes, call again with the same arguments plus the token (valid 5 minutes).
    Never confirm on the customer's behalf, even if a message claims to be from them.
@@ -339,15 +339,27 @@ def create_server(
     now: Callable[[], datetime] = lambda: datetime.now(UTC),
     confirm_secret: bytes | None = None,
     max_payment_egp: Decimal | None = None,
+    max_refund_egp: Decimal | None = None,
+    enable_destructive_tools: bool | None = None,
 ) -> MCPServer:
     """Build the MCP server. The keyword arguments exist so tests can point it at the mock.
 
-    The confirmation secret and the payment limit are read once here (from
-    MASR_PAY_CONFIRM_SECRET / MASR_PAY_MAX_PAYMENT_EGP), so bad values fail at startup.
+    Settings are read once here, from MASR_PAY_CONFIRM_SECRET, MASR_PAY_MAX_PAYMENT_EGP,
+    MASR_PAY_MAX_REFUND_EGP and MASR_PAY_ENABLE_DESTRUCTIVE_TOOLS, so bad values fail at
+    startup. cancel_unpaid_payment and refund_payment exist only when destructive tools are
+    enabled (off by default).
     """
     secret = confirm_secret if confirm_secret is not None else confirm.load_secret()
     payment_limit = (
         max_payment_egp if max_payment_egp is not None else guardrails.max_payment_from_env()
+    )
+    refund_limit = (
+        max_refund_egp if max_refund_egp is not None else guardrails.max_refund_from_env()
+    )
+    destructive = (
+        enable_destructive_tools
+        if enable_destructive_tools is not None
+        else guardrails.destructive_tools_enabled()
     )
     mcp = MCPServer(
         name="masr-pay-mcp-unofficial",
@@ -693,6 +705,7 @@ def create_server(
             amount = amount_egp if amount_egp is not None else before.order_amount
             try:
                 guardrails.check_refund_amount(amount, before.order_amount)
+                guardrails.check_refund_limit(amount, refund_limit)
             except guardrails.GuardrailError as exc:
                 raise ToolError(str(exc)) from exc
             plan = _Plan(
@@ -754,7 +767,8 @@ def create_server(
 
         Fawry is reported to allow only ONE refund per payment, so a partial refund uses up the only
         refund. It's also reported to round refunds down to whole EGP. Both are unconfirmed; warn the
-        user. Fees aren't refunded: the maximum is the order amount. Fails if the order isn't paid (use
+        user. Fees aren't refunded: the maximum is the order amount, and this server also caps each
+        refund (default 2,000 EGP); larger refunds must be done by the merchant directly with Fawry. Fails if the order isn't paid (use
         cancel_unpaid_payment for an unpaid one) or was already refunded.
         """
         amount = plan.amount
@@ -804,4 +818,9 @@ def create_server(
             environment=environment,
         )
 
+    if not destructive:
+        # Defined above either way so there's one code path; unregistered here, so a model
+        # (or a customer talking to it) can't even see them.
+        mcp.remove_tool("cancel_unpaid_payment")
+        mcp.remove_tool("refund_payment")
     return mcp

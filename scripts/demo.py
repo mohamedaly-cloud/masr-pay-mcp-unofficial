@@ -69,6 +69,8 @@ async def run(mock_url: str) -> None:
             "FAWRY_BASE_URL": mock_url,
             "FAWRY_MERCHANT_CODE": MERCHANT,
             "FAWRY_SECURE_KEY": SECURE_KEY,
+            # The merchant runs this assistant, so refunds are on (they are off by default).
+            "MASR_PAY_ENABLE_DESTRUCTIVE_TOOLS": "true",
             "FAWRY_LOG_LEVEL": os.environ.get("FAWRY_LOG_LEVEL", "WARNING"),
         },
     )

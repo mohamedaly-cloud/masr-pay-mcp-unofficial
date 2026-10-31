@@ -23,8 +23,13 @@ issued, all development runs against the mock.
 |---|---|---|
 | `create_cash_payment` | Creates a Pay-at-Fawry reference for an order (amount in EGP, customer mobile/email, expiry in hours, default 72) | |
 | `get_payment_status` | Is it paid? Normalized status (`awaiting_payment`, `paid`, `expired`, …) plus Fawry's raw status | read-only |
-| `cancel_unpaid_payment` | Cancels a reference before it's paid | destructive, needs confirmation |
-| `refund_payment` | Refunds a paid order (full by default; one refund per order) | destructive, needs confirmation |
+| `cancel_unpaid_payment` | Cancels a reference before it's paid | destructive, needs confirmation, **off by default** |
+| `refund_payment` | Refunds a paid order (full by default; one refund per order) | destructive, needs confirmation, **off by default**, max 2,000 EGP per refund |
+
+**Refunds and cancellations are off unless the merchant turns them on**
+(`MASR_PAY_ENABLE_DESTRUCTIVE_TOOLS=true`). Keep them off when the assistant talks to customers
+(a sales bot): the person saying "yes" to a refund must be the merchant, never the customer
+being refunded. Turn them on only for an assistant that the merchant or their staff use.
 
 A destructive tool never acts on the first call. That call returns a **preview** and a
 **confirmation token**, which is HMAC-signed, bound to the exact order, amount and reason, and valid
@@ -79,7 +84,8 @@ a desktop AI app entry, pointed at the local mock:
       "env": {
         "FAWRY_ENV": "mock",
         "FAWRY_MERCHANT_CODE": "MOCKMERCHANT0001",
-        "FAWRY_SECURE_KEY": "mock-secure-key-not-a-real-fawry-key"
+        "FAWRY_SECURE_KEY": "mock-secure-key-not-a-real-fawry-key",
+        "MASR_PAY_ENABLE_DESTRUCTIVE_TOOLS": "true"
       }
     }
   }
@@ -91,7 +97,9 @@ a desktop AI app entry, pointed at the local mock:
 | `FAWRY_ENV` | `mock` (default, `http://127.0.0.1:8080`), `staging` or `production` |
 | `FAWRY_BASE_URL` | Overrides the URL picked by `FAWRY_ENV` |
 | `FAWRY_LOG_LEVEL` | Default `INFO`. Logs go to stderr, redacted. The audit log is always on. |
+| `MASR_PAY_ENABLE_DESTRUCTIVE_TOOLS` | `true` adds `cancel_unpaid_payment` and `refund_payment`. Default off. |
 | `MASR_PAY_MAX_PAYMENT_EGP` | Per-payment limit, default `50000` |
+| `MASR_PAY_MAX_REFUND_EGP` | Per-refund limit, default `2000`. Larger refunds go through Fawry directly. |
 | `MASR_PAY_CONFIRM_SECRET` | HMAC key for confirmation tokens, at least 32 characters. If unset, a random key per process (fine for stdio; required once there are several server instances). |
 
 See [docs/inspector.md](docs/inspector.md) to watch the raw MCP traffic.

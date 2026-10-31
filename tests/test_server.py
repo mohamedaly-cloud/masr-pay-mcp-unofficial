@@ -27,7 +27,13 @@ CREATE_ARGS = {
 
 @pytest.fixture
 def server(config, transport, clock):
-    return create_server(config_loader=lambda: config, transport=transport, now=clock.now)
+    """A merchant-operated server: refunds and cancellations enabled."""
+    return create_server(
+        config_loader=lambda: config,
+        transport=transport,
+        now=clock.now,
+        enable_destructive_tools=True,
+    )
 
 
 def store(mock_app):
@@ -67,6 +73,16 @@ async def test_lists_four_tools_with_safety_annotations(server):
         assert "confirmation_token" in tools[name].input_schema["properties"]
         assert "ctx" not in tools[name].input_schema["properties"]
     assert "EGP" in tools["create_cash_payment"].description
+
+
+async def test_refund_and_cancel_are_hidden_unless_enabled(config, transport, clock):
+    """Default: a customer-facing bot can create and check payments, nothing else."""
+    server = create_server(config_loader=lambda: config, transport=transport, now=clock.now)
+    async with Client(server) as client:
+        names = {t.name for t in (await client.list_tools()).tools}
+        result = await call(client, "refund_payment", {"order_id": "42", "reason": "x"})
+    assert names == {"create_cash_payment", "get_payment_status"}
+    assert result.is_error
 
 
 # ------------------------------------------------------------------ demo flow
@@ -363,7 +379,11 @@ async def test_expired_token_is_refused(server, mock_app, clock):
 async def test_token_from_another_server_secret_is_refused(config, transport, clock, mock_app):
     def make(secret):
         return create_server(
-            config_loader=lambda: config, transport=transport, now=clock.now, confirm_secret=secret
+            config_loader=lambda: config,
+            transport=transport,
+            now=clock.now,
+            confirm_secret=secret,
+            enable_destructive_tools=True,
         )
 
     async with Client(make(b"a" * 32)) as a, Client(make(b"b" * 32)) as b:
@@ -470,6 +490,24 @@ async def test_payment_limit_is_configurable(config, transport, clock, mock_app)
         result = await call(client, "create_cash_payment", CREATE_ARGS)  # 150 EGP
     assert "limit of 100.00 EGP" in error_text(result)
     assert store(mock_app).all() == []
+
+
+async def test_refund_above_the_refund_limit_is_refused(config, transport, clock, mock_app):
+    server = create_server(
+        config_loader=lambda: config,
+        transport=transport,
+        now=clock.now,
+        enable_destructive_tools=True,
+        max_refund_egp=Decimal("100"),
+    )
+    async with Client(server) as client:
+        await paid_order(client, mock_app)
+        too_big = await call(client, "refund_payment", {"order_id": "42", "reason": "x"})  # 150
+        ok = await two_step(
+            client, "refund_payment", {"order_id": "42", "reason": "x", "amount_egp": 100}
+        )
+    assert "limit is 100.00 EGP per refund" in error_text(too_big)
+    assert not ok.is_error, error_text(ok)
 
 
 # ------------------------------------------------------------------ audit log

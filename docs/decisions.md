@@ -99,6 +99,24 @@ moves only in the tool body, which runs once, after an explicit yes. `plan` also
 token, so a bad token is refused before the human is asked anything. Each result records how
 confirmation was obtained (`asked the user directly` or `confirmation token`).
 
+### Refunds and cancellations are opt-in, with their own limit
+- **Off by default (`MASR_PAY_ENABLE_DESTRUCTIVE_TOOLS`).** The whole confirmation design
+  assumes that the human saying "yes" is the merchant. If the server is connected to a
+  customer-facing sales bot, that human is the customer, who could approve their own refund.
+  The safest default for a payments tool is that it can't move money out unless the merchant
+  asked for that. When the tools are disabled they're unregistered, not just refused, so a
+  model can't even be tempted.
+- **Only an explicit `true`/`1`/`yes`/`on` enables them.** Anything unrecognized (a typo such as
+  `ture`) stops the server at startup rather than guessing either way.
+- **A per-refund cap, default 2,000 EGP (`MASR_PAY_MAX_REFUND_EGP`).** It's lower than the
+  50,000 EGP payment cap because the costs aren't symmetric: a wrong charge just goes unpaid,
+  but a wrong refund is money gone. Larger refunds go through the merchant's Fawry dashboard.
+  The 2,000 figure is a starting point, chosen so a typical retail order fits under it; set it
+  per merchant.
+- **No daily total yet.** A cap on all refunds per day needs a running total, which needs state
+  (a database). It doesn't fit v1's no-database rule. Revisit in milestone 3 (DynamoDB or
+  CloudWatch metrics).
+
 ### Audit log
 - **One JSON line per tool call on the `masr_pay_mcp.audit` logger**, written to stderr (stdout
   is the MCP channel) and, from milestone 3, CloudWatch. Fields: `ts`, `tool`, `request_id`,

@@ -25,6 +25,7 @@ npx -y @modelcontextprotocol/inspector@2.11.0 \
   -e FAWRY_ENV=mock \
   -e FAWRY_MERCHANT_CODE=MOCKMERCHANT0001 \
   -e FAWRY_SECURE_KEY=mock-secure-key-not-a-real-fawry-key \
+  -e MASR_PAY_ENABLE_DESTRUCTIVE_TOOLS=true \
   .venv/bin/python -m masr_pay_mcp
 ```
 The Inspector opens in the browser with transport **STDIO** and our command filled in. Click

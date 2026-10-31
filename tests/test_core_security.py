@@ -68,3 +68,17 @@ def test_amount_checks():
     guardrails.check_refund_amount(Decimal("150"), Decimal("150"))
     with pytest.raises(guardrails.GuardrailError, match=r"order amount is 150\.00"):
         guardrails.check_refund_amount(Decimal("150.01"), Decimal("150"))
+
+
+def test_refund_limit_and_destructive_switch_from_env():
+    assert guardrails.max_refund_from_env({}) == Decimal("2000")
+    assert guardrails.max_refund_from_env({guardrails.MAX_REFUND_ENV: "500"}) == 500
+    assert guardrails.destructive_tools_enabled({}) is False
+    for yes in ("true", "1", "YES", " on "):
+        assert guardrails.destructive_tools_enabled({guardrails.ENABLE_DESTRUCTIVE_ENV: yes})
+    for no in ("false", "0", "no", "off", ""):
+        assert not guardrails.destructive_tools_enabled({guardrails.ENABLE_DESTRUCTIVE_ENV: no})
+    with pytest.raises(ValueError, match="true or false"):
+        guardrails.destructive_tools_enabled({guardrails.ENABLE_DESTRUCTIVE_ENV: "ture"})
+    with pytest.raises(guardrails.GuardrailError, match="per refund"):
+        guardrails.check_refund_limit(Decimal("2000.01"), Decimal("2000"))

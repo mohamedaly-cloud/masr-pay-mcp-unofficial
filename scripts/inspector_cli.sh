@@ -7,7 +7,7 @@ insp() {
   npx -y @modelcontextprotocol/inspector@2.11.0 --cli \
     -e FAWRY_ENV=mock -e FAWRY_MERCHANT_CODE=MOCKMERCHANT0001 \
     -e FAWRY_SECURE_KEY=mock-secure-key-not-a-real-fawry-key \
-    -e MASR_PAY_CONFIRM_SECRET="$SECRET" -e FAWRY_LOG_LEVEL=WARNING \
+    -e MASR_PAY_CONFIRM_SECRET="$SECRET" -e FAWRY_LOG_LEVEL=WARNING -e MASR_PAY_ENABLE_DESTRUCTIVE_TOOLS=true \
     .venv/bin/python -m masr_pay_mcp --method tools/call "$@" 2>/dev/null
 }
 sc() { python3 -c "import json,sys; d=json.load(sys.stdin); print('isError=%s' % d.get('isError', False), json.dumps(d.get('structuredContent') or d['content'][0]['text'])[:400])"; }
