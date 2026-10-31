@@ -82,7 +82,7 @@ python scripts/demo.py   # create 150 EGP for order 42 -> pay -> "paid?" -> refu
 
 ## Use it from an MCP host
 The server speaks stdio: `python -m masr_pay_mcp`, or the `masr-pay-mcp-unofficial` command. Example
-a desktop AI app entry, pointed at the local mock:
+host entry (the `mcpServers` format most MCP hosts use), pointed at the local mock:
 ```json
 {
   "mcpServers": {
