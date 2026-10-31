@@ -26,22 +26,33 @@ issued, all development runs against the mock.
 | `cancel_unpaid_payment` | Cancels a reference before it's paid | destructive, needs confirmation |
 | `refund_payment` | Refunds a paid order (full by default; one refund per order) | destructive, needs confirmation |
 
-A destructive tool needs three things: the host's approval prompt (`destructiveHint`), an explicit
-`confirmed_by_user=true` from the model, and, when the client supports MCP elicitation, a direct
-"yes" from the human, who sees the exact amount and reference.
+A destructive tool never acts on the first call. That call returns a **preview** and a
+**confirmation token**, which is HMAC-signed, bound to the exact order, amount and reason, and valid
+for 5 minutes. The action happens only on a second call that carries the token. The host's approval
+prompt (`destructiveHint`) also applies, and when the client supports MCP elicitation the server
+asks the human directly.
+
+Also built in: one redacted JSON **audit line per tool call** (stderr), a **per-payment limit**
+(default 50,000 EGP), refunds capped at the order amount, and Fawry response signatures verified
+before anything is reported as paid. See [docs/threat-model.md](docs/threat-model.md).
 
 ## Layout
 ```
-fawry_mcp/server.py       the four MCP tools
-fawry_mcp/client.py       Fawry HTTP client: signs requests, verifies responses, normalizes fields
-fawry_mcp/config.py       environment + credentials (read fresh on every call)
-fawry_mcp/signatures.py   Fawry SHA-256 signature recipes, one function each
-fawry_mcp/redaction.py    keeps secrets and customer PII out of logs
-mock_fawry/               FastAPI mock of Fawry staging (in-memory orders)
-tests/                    pytest; tests/vectors.json holds our own signature vectors
-scripts/demo.py           milestone demo over real stdio
-docs/decisions.md         why things are the way they are, plus the "verify" list
-docs/inspector.md         MCP Inspector walkthrough
+masr_pay_mcp/server.py                     the four MCP tools
+masr_pay_mcp/core/confirm.py               stateless HMAC confirmation tokens
+masr_pay_mcp/core/audit.py                 one structured audit line per tool call
+masr_pay_mcp/core/guardrails.py            payment limit, refund cap
+masr_pay_mcp/core/redaction.py             keeps secrets and customer PII out of logs
+masr_pay_mcp/core/provider.py              provider-neutral interface (Fawry switches to it next)
+masr_pay_mcp/providers/fawry/client.py     signs requests, verifies responses, normalizes fields
+masr_pay_mcp/providers/fawry/config.py     environment + credentials (read fresh on every call)
+masr_pay_mcp/providers/fawry/signatures.py Fawry SHA-256 signature recipes, one function each
+mock_fawry/                                FastAPI mock of Fawry staging (in-memory orders)
+tests/                                     pytest; tests/vectors.json holds our own signature vectors
+scripts/demo.py                            milestone demo over real stdio
+docs/decisions.md                          why things are the way they are, plus the "verify" list
+docs/threat-model.md                       threats and the code that mitigates each
+docs/inspector.md                          MCP Inspector walkthrough
 ```
 
 ## Develop
@@ -54,17 +65,17 @@ ruff check . && ruff format --check .
 
 ## Run the demo
 ```bash
-python scripts/demo.py   # mock + MCP server over stdio: create 150 EGP for order 42 -> pay -> "paid?"
+python scripts/demo.py   # create 150 EGP for order 42 -> pay -> "paid?" -> refund preview -> confirm
 ```
 
 ## Use it from an MCP host
-The server speaks stdio: `python -m fawry_mcp`, or the `fawry-mcp-unofficial` command. Example
+The server speaks stdio: `python -m masr_pay_mcp`, or the `masr-pay-mcp-unofficial` command. Example
 a desktop AI app entry, pointed at the local mock:
 ```json
 {
   "mcpServers": {
     "fawry-unofficial": {
-      "command": "/path/to/repo/.venv/bin/fawry-mcp-unofficial",
+      "command": "/path/to/repo/.venv/bin/masr-pay-mcp-unofficial",
       "env": {
         "FAWRY_ENV": "mock",
         "FAWRY_MERCHANT_CODE": "MOCKMERCHANT0001",
@@ -79,7 +90,9 @@ a desktop AI app entry, pointed at the local mock:
 | `FAWRY_MERCHANT_CODE`, `FAWRY_SECURE_KEY` | Required. Read on every call, never stored. |
 | `FAWRY_ENV` | `mock` (default, `http://127.0.0.1:8080`), `staging` or `production` |
 | `FAWRY_BASE_URL` | Overrides the URL picked by `FAWRY_ENV` |
-| `FAWRY_LOG_LEVEL` | Default `INFO`. Logs go to stderr, redacted. |
+| `FAWRY_LOG_LEVEL` | Default `INFO`. Logs go to stderr, redacted. The audit log is always on. |
+| `MASR_PAY_MAX_PAYMENT_EGP` | Per-payment limit, default `50000` |
+| `MASR_PAY_CONFIRM_SECRET` | HMAC key for confirmation tokens, at least 32 characters. If unset, a random key per process (fine for stdio; required once there are several server instances). |
 
 See [docs/inspector.md](docs/inspector.md) to watch the raw MCP traffic.
 

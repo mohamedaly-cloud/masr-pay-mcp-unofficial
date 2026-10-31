@@ -63,12 +63,27 @@ review or an interview. Newest milestone first.
 ### Human confirmation for cancel and refund (rule 4)
 Three layers. Each one alone can be bypassed; together they are hard to get wrong:
 1. **`destructiveHint: true`** makes MCP hosts show their own approval prompt.
-2. **`confirmed_by_user: bool`, default false.** The model must state that the human said yes.
-   Without it the tool refuses *before* touching Fawry. This depends on the model being
-   honest, so it isn't enough alone.
+2. **Two-step HMAC confirmation token** (docs/design.md "Security and trust" #1). Call 1 without a
+   token changes nothing: it returns a preview and a token. Call 2 with the same arguments plus
+   the token does the action. The token is `<expiry>.<HMAC-SHA256(secret, tool + exact args +
+   expiry)>`, valid 5 minutes. It replaced an earlier `confirmed_by_user: bool` flag:
+   - *Why the token beats the flag:* the flag was one call, so a model could set it without
+     ever showing the human anything. The token can't exist before a preview has been
+     produced, and it binds approval to the exact order, reference, amount and reason. "Approve
+     10 EGP, execute 150 EGP" fails (tested).
+   - *Why it stays stateless:* the server stores nothing. It recomputes the HMAC from call 2's
+     arguments and compares in constant time. Single use isn't enforced with a store; a
+     replay inside the 5 minutes finds the order already refunded or cancelled, because the
+     status is re-checked on every call. See `docs/threat-model.md` T3.
+   - *Where the secret comes from:* `MASR_PAY_CONFIRM_SECRET` (at least 32 chars), or a random
+     key per process when it's unset. That's right for stdio. On Lambda (milestone 3) it must
+     be set, or tokens fail closed across instances.
+   - *What's bound:* tool name, `order_id`, the Fawry reference, the resolved amount (so "full
+     refund" means the amount the human saw) and the reason (refund) or language (cancel).
 3. **MCP elicitation**: when the client supports it, the server asks the human directly,
    showing the exact amount, order and reference. Decline, cancel, or an unticked box means
-   nothing happens.
+   nothing happens. It's asked only on call 2: call 1 changes nothing, so nobody is asked
+   about a preview.
 
 How layer 3 is built matters for milestone 3. Under protocol 2026-07-28 a server can't push a
 request to the client mid-call (a first version using `ctx.elicit()` failed with
@@ -80,8 +95,58 @@ request to the client mid-call (a first version using `ctx.elicit()` failed with
   round on 2026-07-28, or a mid-call `elicitation/create` on older protocols. Both are tested.
 
 Resolvers may run again on the retry round. That's safe because `plan` is read-only: the money
-moves only in the tool body, which runs once, after an explicit yes. Each result records how
-confirmation was obtained (`asked the user directly` or `confirmed_by_user flag`).
+moves only in the tool body, which runs once, after an explicit yes. `plan` also verifies the
+token, so a bad token is refused before the human is asked anything. Each result records how
+confirmation was obtained (`asked the user directly` or `confirmation token`).
+
+### Audit log
+- **One JSON line per tool call on the `masr_pay_mcp.audit` logger**, written to stderr (stdout
+  is the MCP channel) and, from milestone 3, CloudWatch. Fields: `ts`, `tool`, `request_id`,
+  `merchant_ref`, `amount_egp`, `outcome` (`ok` / `preview` / `error`), `raw_status`,
+  `environment`, `provider_code` (Fawry's statusCode on errors) and `error`.
+- **One line per call, including refusals.** A destructive call that is refused in its
+  pre-check (not paid, already refunded, bad token) is logged from the pre-check. One that gets
+  past it is logged from the tool body. A refused refund is exactly what you want in an audit
+  trail when someone asks "did the bot try to refund order 42?".
+- **Double redaction.** The entry goes through `redact_mapping` before it's serialized, and the
+  line goes through the handler's `RedactingFilter`. Customer mobile and email are never put in
+  the entry in the first place.
+- **`FAWRY_LOG_LEVEL` can't silence it.** The audit logger is pinned to INFO, because an audit
+  trail you can switch off by accident isn't one.
+- **A context manager, not SDK middleware.** The SDK's middleware API is marked as liable to
+  change in 2.x minors, and it sees raw JSON-RPC, not Fawry status codes.
+
+### Guardrails
+- **A per-payment limit, default 50,000 EGP (`MASR_PAY_MAX_PAYMENT_EGP`).** It's read once at
+  startup, so a typo fails the server at boot rather than on a customer's payment. It's checked
+  before anything goes to Fawry.
+- **The refund cap moved to `core/guardrails.py`.** Same rule as before (≤ order amount, V6), but
+  now provider-neutral and unit-tested on its own.
+- **`merchantRefNum` is the merchant's `order_id`, not a server-generated value (decided
+  2026-10-31; docs/design.md updated).** The original plan was a server-generated unique reference.
+  In a stateless server (no database, rule 2), a generated reference couldn't be found again
+  from "did Ahmed pay for order 42?" without storing a mapping. Options considered:
+  - *Random generated reference:* needs a database. Rejected (rule 2).
+  - *Deterministic hash of merchant + order_id:* stateless, but it hides the merchant's own order
+    number in Fawry's dashboard and reports, which makes support and reconciliation harder.
+    Rejected.
+  - *`order_id` as `merchantRefNum`, plus our own duplicate check (chosen).* Before charging,
+    `create_cash_payment` looks the order up. If Fawry already has a payment for it, the tool
+    refuses and names the existing reference. So duplicate protection doesn't depend on how
+    Fawry treats a repeated `merchantRefNum` (V8, unverified). Two creates racing each other can
+    both pass the check, and Fawry's uniqueness is the backstop for that rare case. The cost
+    is one extra status call per create, which is cheap next to a double charge. Tested:
+    `test_duplicate_order_id_is_refused_before_charging` proves Fawry never sees the second
+    charge.
+
+### MCP Inspector and pip-audit (run 2026-10-31)
+- **Inspector pinned to 2.11.0**, past the CVE-2025-49596 fix (0.14.1) and more than two weeks
+  old, so a bad release has had time to be noticed (2.13.0 was 3 days old). The full flow ran in
+  CLI mode through `scripts/inspector_cli.sh`; results are in `docs/inspector.md`.
+- **`pip-audit`: the project's dependencies have no known vulnerabilities.** The only findings
+  were in `pip` 24.0 itself, the copy bundled into the venv by the system Python, and upgrading
+  pip in the venv cleared them. CI (milestone 3) runs `pip-audit` on every PR and should
+  upgrade pip first, or it will report the same false alarm about the tool rather than the app.
 
 ### Logging check (rule 3)
 I ran the stdio demo with server logs at INFO/DEBUG and grepped for the key, the customer's mobile
@@ -93,10 +158,11 @@ redacts any non-numeric argument through its string form (with a regression test
 for interviews: redaction needs an end-to-end check against real log output, not just unit tests.
 
 ### Not done in milestone 2 (on purpose)
-- **MCP Inspector walkthrough:** written up in `docs/inspector.md` but not run in the build
-  environment, where downloading the Inspector from npm was blocked. `scripts/demo.py` covers the
-  same stdio path automatically.
 - **HTTP transport and per-request credentials from headers:** milestone 3.
+- **Switching the Fawry client and server to `core/provider.py`'s `PaymentProvider`
+  interface:** the interface exists, but the server still calls `FawryClient` directly. That's
+  a pure refactor with no behaviour change, so it's kept as its own PR to keep this one
+  reviewable.
 
 ## Milestone 1: mock, signatures, tests
 
