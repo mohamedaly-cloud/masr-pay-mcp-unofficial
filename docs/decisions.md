@@ -3,18 +3,113 @@
 Short, plain-English reasons for the non-obvious choices, so each one can be defended in a
 review or an interview. Newest milestone first.
 
+## Milestone 2: MCP server, stdio
+
+### SDK and dependencies
+- **Official MCP Python SDK 2.3 (`mcp>=2.3,<3`), class `MCPServer`.** Answers the open question
+  in docs/design.md: v2 imports are `from mcp.server import MCPServer` and `from mcp import Client`.
+  FastMCP was folded into the official SDK and renamed `MCPServer`, so there's no separate
+  FastMCP to evaluate. The SDK lists `2026-07-28` as its modern (stateless) protocol and still
+  negotiates older revisions with clients that need them.
+- **`httpx2` for the Fawry client.** The MCP SDK already depends on it, so it adds nothing to
+  the install. It also replaces the dev-only `httpx` from milestone 1 (Starlette's `TestClient`
+  prefers it), so that dependency is gone. **No new third-party dependencies in milestone 2.**
+- **`anyio`'s pytest plugin for async tests** instead of adding `pytest-asyncio`: anyio already
+  comes with the SDK.
+- **Lint: `ruff format` owns line length; E501 is off.** Tool descriptions are long prose
+  strings that the formatter deliberately doesn't wrap.
+
+### Statelessness
+- **Credentials are read from the environment on every tool call** and a new `FawryClient` is
+  built per call. Nothing is cached, so rotating a key needs no restart, and the same code moves
+  to Lambda in milestone 3, where credentials will come from per-request headers instead.
+- **`Credentials.secure_key` has `repr=False`**, so the key can't leak through a traceback, an
+  error message or a debug print. A test checks this.
+- **The default environment is `mock`.** A server started with no `FAWRY_ENV` can never hit
+  production by accident; production has to be asked for by name.
+
+### Client
+- **Every response that carries order data has its signature verified, and the client fails
+  closed.** A response that doesn't verify (tampered, wrong key, or missing fields) raises
+  `ResponseSignatureError` and the tool reports "can't be trusted". The alternative, logging a
+  warning and continuing, would let a spoofed "PAID" through, which is exactly what an attacker
+  would want.
+- **Field names are normalized in one place.** `merchantRefNum`/`merchantRefNumber` and
+  `referenceNumber`/`fawryRefNumber` become one `Payment` dataclass. Statuses map to a small
+  normalized set (`NEW`/`UNPAID`/`PENDING` → `awaiting_payment`), and the raw value is kept too.
+- **The client always checks Fawry's `statusCode`**, not only the HTTP status (milestone 1
+  decision V7).
+- **No automatic retries.** A charge isn't idempotent from our side, so retrying a timed-out
+  POST could create confusion. Errors tell the model it's safe to *check the status* again,
+  which is the idempotent way to recover.
+
+### Tools
+- **The tools take `order_id`, not Fawry's reference number, even for cancel and refund.** The
+  user says "refund order 42", not "refund 309418146". The tool looks up the reference itself,
+  which also gives it a fresh, signed status to check before acting.
+- **Inputs are validated before anything goes to Fawry**: amounts > 0 with at most two decimals,
+  Egyptian mobiles (`+20`/`0020` forms are normalized to `01…`), order ids restricted to
+  `[A-Za-z0-9._-]`, and expiry from just above 0 up to 720 hours. Invalid input becomes a tool
+  error, never a Fawry 9946.
+- **Results are structured (Pydantic models)** and include a plain-English `summary`, the
+  `environment` (so the model can say "this was a test payment") and both UTC and Cairo times.
+  Amounts are strings like `"150.00"` so they can't pick up float noise.
+- **Errors are `ToolError`s written for the model**: what happened, whether anything changed,
+  what to do next (e.g. "use refund_payment instead"). Secrets are never echoed back; a test
+  checks that a wrong key doesn't appear in the error.
+- **Fees aren't refunded by default.** A full refund is the order amount, not the payment
+  amount (verify list V6).
+
+### Human confirmation for cancel and refund (rule 4)
+Three layers. Each one alone can be bypassed; together they are hard to get wrong:
+1. **`destructiveHint: true`** makes MCP hosts show their own approval prompt.
+2. **`confirmed_by_user: bool`, default false.** The model must state that the human said yes.
+   Without it the tool refuses *before* touching Fawry. This depends on the model being
+   honest, so it isn't enough alone.
+3. **MCP elicitation**: when the client supports it, the server asks the human directly,
+   showing the exact amount, order and reference. Decline, cancel, or an unticked box means
+   nothing happens.
+
+How layer 3 is built matters for milestone 3. Under protocol 2026-07-28 a server can't push a
+request to the client mid-call (a first version using `ctx.elicit()` failed with
+`NoBackChannelError`). The SDK's answer is **resolvers**: tool parameters annotated
+`Annotated[T, Resolve(fn)]` that run before the tool body. Each destructive tool has two:
+- **`plan`** checks the flag, looks up the order and checks its status and amount. It fails fast,
+  so the human is never asked about something that would fail anyway (there's a test for this).
+- **`answer`** returns an `Elicit(question)`. The SDK turns it into an `InputRequiredResult`
+  round on 2026-07-28, or a mid-call `elicitation/create` on older protocols. Both are tested.
+
+Resolvers may run again on the retry round. That's safe because `plan` is read-only: the money
+moves only in the tool body, which runs once, after an explicit yes. Each result records how
+confirmation was obtained (`asked the user directly` or `confirmed_by_user flag`).
+
+### Logging check (rule 3)
+I ran the stdio demo with server logs at INFO/DEBUG and grepped for the key, the customer's mobile
+and email, and anything shaped like a 64-hex signature. That **found a real leak**: `httpx2` logs
+each request URL at INFO, and the status v2 URL carries `?signature=…`. The redacting filter missed
+it because `httpx2` passes the URL as a `URL` object, not a `str`. Fixed twice over: the filter now
+redacts any non-numeric argument through its string form (with a regression test using a real
+`httpx2.URL`), and `httpx2`/`httpcore2` loggers are set to WARNING. A re-run found zero leaks. Lesson
+for interviews: redaction needs an end-to-end check against real log output, not just unit tests.
+
+### Not done in milestone 2 (on purpose)
+- **MCP Inspector walkthrough:** written up in `docs/inspector.md` but not run in the build
+  environment, where downloading the Inspector from npm was blocked. `scripts/demo.py` covers the
+  same stdio path automatically.
+- **HTTP transport and per-request credentials from headers:** milestone 3.
+
 ## Milestone 1: mock, signatures, tests
 
 ### Dependencies outside the stack table (awaiting director approval)
 | Package | Used for | Why it's needed |
 |---|---|---|
 | `uvicorn` | Running the FastAPI mock locally (`python -m mock_fawry`) | FastAPI is only a framework; something has to serve HTTP. Uvicorn is the server FastAPI documents. On Lambda (milestone 3) it won't be used. |
-| `httpx` (dev only) | FastAPI's `TestClient` | `TestClient` requires it. It's also the likely HTTP client for `client.py` in milestone 2. |
+| ~~`httpx`~~ (dev only) | FastAPI's `TestClient` | Replaced by `httpx2` in milestone 2 (see above). |
 | `ruff` (dev only) | Lint and format | One fast tool in place of flake8 + isort + black; the "lint" step in CI. Enables the `S` (bandit) rules so things like hard-coded secrets get flagged. |
 | `hatchling` (build only) | Packaging from `pyproject.toml` | Standard, no-config build backend. |
 
-Starlette now warns that `TestClient` prefers `httpx2` over `httpx`. Tests pass either way;
-we'll decide on the HTTP client in milestone 2 and settle this then.
+Starlette warned that `TestClient` prefers `httpx2` over `httpx`; settled in milestone 2 by
+switching to `httpx2`.
 
 ### Signatures
 - **One function per recipe, each split into `*_plain` + hash.** Most signature bugs are
@@ -75,4 +170,7 @@ comment. Settle them once sandbox access or official answers arrive.
 | V7 | Business errors come back as HTTP 200 with a Fawry `statusCode` | mock `fawry_result` |
 | V8 | Fawry's behaviour on a duplicate `merchantRefNum` (the mock answers 409) | mock charge handler |
 | V9 | Refund and cancel response bodies (`ResponseDataModel` shape) and whether they're signed | mock |
-| V10 | Fawry's default expiry when `paymentExpiry` is omitted (the mock: never expires) | `state._apply_expiry` |
+| V10 | Fawry's default expiry when `paymentExpiry` is omitted (the mock: never expires). Our tool always sends one (default 72 h). | `state._apply_expiry` |
+| V11 | The status response has `paymentTime` in epoch milliseconds and `refundedAmount` after a refund | `client._payment_from` |
+| V12 | Status names beyond the documented ones (`CANCELLED` spelling, `PARTIALLY_REFUNDED`) are mapped defensively; anything else becomes `unknown`, with the raw value kept | `client.NORMALIZED_STATUS` |
+| V13 | Fawry accepts amounts as JSON numbers (we send `150.0`, not `"150.00"`) | `client.create_pay_at_fawry_charge` |

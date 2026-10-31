@@ -14,17 +14,34 @@ agent can take cash payments in Egypt.
 > credentials or funds.
 
 ## Status
-Milestone 1 of 4: signature recipes, a local mock of the Fawry API, and tests. The MCP tools
-come in milestone 2. Until official sandbox credentials are issued, all development runs
-against the mock.
+Milestone 2 of 4: four MCP tools over stdio, built on the official MCP Python SDK v2 (protocol
+2026-07-28), tested against a local mock of the Fawry API. Until official sandbox credentials are
+issued, all development runs against the mock.
+
+## Tools
+| Tool | What it does | Safety |
+|---|---|---|
+| `create_cash_payment` | Creates a Pay-at-Fawry reference for an order (amount in EGP, customer mobile/email, expiry in hours, default 72) | |
+| `get_payment_status` | Is it paid? Normalized status (`awaiting_payment`, `paid`, `expired`, …) plus Fawry's raw status | read-only |
+| `cancel_unpaid_payment` | Cancels a reference before it's paid | destructive, needs confirmation |
+| `refund_payment` | Refunds a paid order (full by default; one refund per order) | destructive, needs confirmation |
+
+A destructive tool needs three things: the host's approval prompt (`destructiveHint`), an explicit
+`confirmed_by_user=true` from the model, and, when the client supports MCP elicitation, a direct
+"yes" from the human, who sees the exact amount and reference.
 
 ## Layout
 ```
+fawry_mcp/server.py       the four MCP tools
+fawry_mcp/client.py       Fawry HTTP client: signs requests, verifies responses, normalizes fields
+fawry_mcp/config.py       environment + credentials (read fresh on every call)
 fawry_mcp/signatures.py   Fawry SHA-256 signature recipes, one function each
 fawry_mcp/redaction.py    keeps secrets and customer PII out of logs
 mock_fawry/               FastAPI mock of Fawry staging (in-memory orders)
 tests/                    pytest; tests/vectors.json holds our own signature vectors
+scripts/demo.py           milestone demo over real stdio
 docs/decisions.md         why things are the way they are, plus the "verify" list
+docs/inspector.md         MCP Inspector walkthrough
 ```
 
 ## Develop
@@ -34,6 +51,37 @@ pip install -e ".[dev]"
 pytest
 ruff check . && ruff format --check .
 ```
+
+## Run the demo
+```bash
+python scripts/demo.py   # mock + MCP server over stdio: create 150 EGP for order 42 -> pay -> "paid?"
+```
+
+## Use it from an MCP host
+The server speaks stdio: `python -m fawry_mcp`, or the `fawry-mcp-unofficial` command. Example
+a desktop AI app entry, pointed at the local mock:
+```json
+{
+  "mcpServers": {
+    "fawry-unofficial": {
+      "command": "/path/to/repo/.venv/bin/fawry-mcp-unofficial",
+      "env": {
+        "FAWRY_ENV": "mock",
+        "FAWRY_MERCHANT_CODE": "MOCKMERCHANT0001",
+        "FAWRY_SECURE_KEY": "mock-secure-key-not-a-real-fawry-key"
+      }
+    }
+  }
+}
+```
+| Env var | Meaning |
+|---|---|
+| `FAWRY_MERCHANT_CODE`, `FAWRY_SECURE_KEY` | Required. Read on every call, never stored. |
+| `FAWRY_ENV` | `mock` (default, `http://127.0.0.1:8080`), `staging` or `production` |
+| `FAWRY_BASE_URL` | Overrides the URL picked by `FAWRY_ENV` |
+| `FAWRY_LOG_LEVEL` | Default `INFO`. Logs go to stderr, redacted. |
+
+See [docs/inspector.md](docs/inspector.md) to watch the raw MCP traffic.
 
 ## Run the mock
 ```bash
