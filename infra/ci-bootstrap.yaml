@@ -17,9 +17,12 @@ Description: >-
 #     and read the app's secret. So a bad template can't mint an admin role.
 
 Parameters:
-  GitHubRepo:
+  GitHubSubjectPrefix:
     Type: String
-    Default: mohamedaly-cloud/masr-pay-mcp-unofficial
+    # GitHub's immutable OIDC subject: owner and repo by name AND numeric id. If the repo is ever
+    # deleted and someone re-creates the same name, their tokens carry other ids and are refused.
+    # Read it with: gh api repos/OWNER/REPO/actions/oidc/customization/sub (sub_claim_prefix).
+    Default: repo:mohamedaly-cloud@178811720/masr-pay-mcp-unofficial@1440809369
   AppStackName:
     Type: String
     Default: masr-pay-mcp
@@ -222,7 +225,7 @@ Resources:
               StringEquals:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
                 # Only workflow runs on main of this repo: not forks, not PRs, not other branches.
-                token.actions.githubusercontent.com:sub: !Sub repo:${GitHubRepo}:ref:refs/heads/main
+                token.actions.githubusercontent.com:sub: !Sub ${GitHubSubjectPrefix}:ref:refs/heads/main
       Policies:
         - PolicyName: deploy-app-stack
           PolicyDocument:

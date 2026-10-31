@@ -66,8 +66,11 @@ Short, plain-English reasons for the non-obvious choices. Newest milestone first
 
 ### Least-privilege IAM, and deploys without AWS keys
 - **GitHub Actions gets AWS access through OIDC.** No access keys are stored in GitHub. The deploy
-  role trusts only `repo:mohamedaly-cloud/masr-pay-mcp-unofficial:ref:refs/heads/main`, so forks,
-  PRs and other branches can't assume it.
+  role trusts only this repo's `main` branch, so forks, PRs and other branches can't assume it.
+- **The trust uses GitHub's immutable subject**, which names the owner and repo by numeric id as
+  well as by name: `repo:mohamedaly-cloud@178811720/masr-pay-mcp-unofficial@1440809369:ref:refs/heads/main`.
+  The first automatic deploy failed because the role expected the plain-name form. The id form is
+  safer: if the repo were deleted and the name re-created by someone else, the ids wouldn't match.
 - **Three layers (`infra/ci-bootstrap.yaml`):**
   1. *Deploy role (GitHub):* can only run change sets on the `masr-pay-mcp` stack, upload to the
      artifact bucket, and pass the CloudFormation role to CloudFormation. It can't create
