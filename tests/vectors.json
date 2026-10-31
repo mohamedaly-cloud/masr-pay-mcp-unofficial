@@ -1,0 +1,123 @@
+{
+  "about": "Our own signature test vectors. Each 'plain' string is built by hand from the recipe in docs/design.md, and each 'sha256' was computed with coreutils (printf '%s' \"$plain\" | sha256sum), NOT with fawry_mcp.signatures, so the tests don't just check the code against itself. Fawry's doc sample signatures are deliberately not used: they don't match Fawry's own recipe. The secure key and merchant code are fake.",
+  "secure_key": "fake-secure-key-for-tests-only",
+  "vectors": [
+    {
+      "name": "charge_request_with_profile_id",
+      "recipe": "charge_request",
+      "inputs": {
+        "merchant_code": "MOCKMERCHANT0001",
+        "merchant_ref_num": "ORDER-42",
+        "customer_profile_id": "CUST-7",
+        "payment_method": "PayAtFawry",
+        "amount": "350"
+      },
+      "plain": "MOCKMERCHANT0001ORDER-42CUST-7PayAtFawry350.00fake-secure-key-for-tests-only",
+      "sha256": "29ac9baffc9694da440c8edd2e25908a032f62ab099272bc11bb1cfad1db52aa"
+    },
+    {
+      "name": "charge_request_without_profile_id",
+      "recipe": "charge_request",
+      "inputs": {
+        "merchant_code": "MOCKMERCHANT0001",
+        "merchant_ref_num": "ORDER-43",
+        "customer_profile_id": null,
+        "payment_method": "PayAtFawry",
+        "amount": "580.55"
+      },
+      "plain": "MOCKMERCHANT0001ORDER-43PayAtFawry580.55fake-secure-key-for-tests-only",
+      "sha256": "9ddc40077e80414c66d5f2fab8c1bb3d5e0ca4e08579908b4fce576f560a9374"
+    },
+    {
+      "name": "charge_request_whole_amount_gets_two_decimals",
+      "recipe": "charge_request",
+      "inputs": {
+        "merchant_code": "MOCKMERCHANT0001",
+        "merchant_ref_num": "ORDER-44",
+        "customer_profile_id": null,
+        "payment_method": "PayAtFawry",
+        "amount": 20
+      },
+      "plain": "MOCKMERCHANT0001ORDER-44PayAtFawry20.00fake-secure-key-for-tests-only",
+      "sha256": "ff00e3470790d54c51e12c1e8da809171d11f76ce1e9efea4ca17195e006ce5f"
+    },
+    {
+      "name": "charge_response_with_optional_fields",
+      "recipe": "charge_response",
+      "inputs": {
+        "reference_number": "123456789",
+        "merchant_ref_num": "ORDER-42",
+        "payment_amount": "355.00",
+        "order_amount": "350.00",
+        "order_status": "UNPAID",
+        "payment_method": "PayAtFawry",
+        "fawry_fees": "5",
+        "shipping_fees": null,
+        "auth_number": null,
+        "customer_mail": "ahmed@example.com",
+        "customer_mobile": "01012345678"
+      },
+      "plain": "123456789ORDER-42355.00350.00UNPAIDPayAtFawry5.00ahmed@example.com01012345678fake-secure-key-for-tests-only",
+      "sha256": "eae8514f86f5a1b78dddc1fa96143b5957fb9608fe728ea3fc44b06b0ceb8559"
+    },
+    {
+      "name": "charge_response_minimal",
+      "recipe": "charge_response",
+      "inputs": {
+        "reference_number": null,
+        "merchant_ref_num": "ORDER-43",
+        "payment_amount": "580.55",
+        "order_amount": "580.55",
+        "order_status": "UNPAID",
+        "payment_method": "PayAtFawry"
+      },
+      "plain": "ORDER-43580.55580.55UNPAIDPayAtFawryfake-secure-key-for-tests-only",
+      "sha256": "5534108259f546a01c0a7b66cd60eae3f518388acffdfa93e1d591384e08c838"
+    },
+    {
+      "name": "status_v2",
+      "recipe": "status_v2",
+      "inputs": {
+        "merchant_code": "MOCKMERCHANT0001",
+        "merchant_ref_number": "ORDER-42"
+      },
+      "plain": "MOCKMERCHANT0001ORDER-42fake-secure-key-for-tests-only",
+      "sha256": "8db3ff0f8e73623718ed617b36eef3ebb55410beee48d745eb79b0c5b80f8ec5"
+    },
+    {
+      "name": "refund_english_reason",
+      "recipe": "refund",
+      "inputs": {
+        "merchant_code": "MOCKMERCHANT0001",
+        "reference_number": "123456789",
+        "refund_amount": "100",
+        "reason": "Customer returned item"
+      },
+      "plain": "MOCKMERCHANT0001123456789100.00Customer returned itemfake-secure-key-for-tests-only",
+      "sha256": "cfe7457625bd0ad097c78585a70696943e92a44c1a0cdc8dbcf1a07d11d30aaf"
+    },
+    {
+      "name": "refund_arabic_reason_utf8",
+      "recipe": "refund",
+      "inputs": {
+        "merchant_code": "MOCKMERCHANT0001",
+        "reference_number": "123456789",
+        "refund_amount": "350.00",
+        "reason": "منتج تالف"
+      },
+      "plain": "MOCKMERCHANT0001123456789350.00منتج تالفfake-secure-key-for-tests-only",
+      "sha256": "bff268af9d1c72ea23a453b1629e345664df10bdf1cc155bd7af9bc4bc32caa3"
+    },
+    {
+      "name": "cancel_unpaid",
+      "recipe": "cancel_unpaid",
+      "inputs": {
+        "order_ref_no": "123456789",
+        "merchant_account": "MOCKMERCHANT0001",
+        "lang": "en-gb"
+      },
+      "plain": "123456789MOCKMERCHANT0001en-gbfake-secure-key-for-tests-only",
+      "sha256": "3b0e32a52d037c141860220662dc6b5bdd4145b258d6db4751eede6189a22aa5"
+    }
+  ]
+}
