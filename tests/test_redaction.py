@@ -72,3 +72,23 @@ def test_redacting_filter_handles_mapping_args_and_msg():
     assert SIG not in message
     assert "ahmed@example.com" not in message
     assert "'amount': 1" in message
+
+
+def test_redacting_filter_handles_non_string_args_like_urls():
+    import httpx2
+
+    url = httpx2.URL(f"http://fawry/status/v2?merchantRefNumber=42&signature={SIG}")
+    record = logging.LogRecord(
+        "httpx2",
+        logging.INFO,
+        __file__,
+        1,
+        'HTTP Request: %s %s "%s %d %s"',
+        ("GET", url, "HTTP/1.1", 200, "OK"),
+        None,
+    )
+    RedactingFilter().filter(record)
+    message = record.getMessage()
+    assert SIG not in message
+    assert "merchantRefNumber=42" in message
+    assert '"HTTP/1.1 200 OK"' in message

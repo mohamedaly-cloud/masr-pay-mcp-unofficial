@@ -87,8 +87,11 @@ class RedactingFilter(logging.Filter):
 
 
 def _redact_arg(arg: Any) -> Any:
-    if isinstance(arg, str):
-        return redact_text(arg)
-    if isinstance(arg, Mapping | list):
+    # Numbers keep their type so %d / %.2f still work. Everything else is redacted
+    # through its string form. That includes objects such as httpx2.URL, whose
+    # str() can carry ?signature=... (a live run caught exactly that).
+    if arg is None or isinstance(arg, bool | int | float):
+        return arg
+    if isinstance(arg, Mapping | list | tuple):
         return redact_text(str(redact_mapping(arg)))
-    return arg  # numbers etc. keep their type so %d still works
+    return redact_text(str(arg))
