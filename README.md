@@ -14,9 +14,9 @@ agent can take cash payments in Egypt.
 > credentials or funds.
 
 ## Status
-Milestone 2 of 4: four MCP tools over stdio, built on the official MCP Python SDK v2 (protocol
-2026-07-28), tested against a local mock of the Fawry API. Until official sandbox credentials are
-issued, all development runs against the mock.
+Milestone 3 of 4: four MCP tools, over stdio locally and over Streamable HTTP on AWS Lambda,
+built on the official MCP Python SDK v2 (protocol 2026-07-28). Until official sandbox credentials
+are issued, everything runs against our own mock of the Fawry API, which is also deployed.
 
 ## Tools
 | Tool | What it does | Safety |
@@ -44,6 +44,7 @@ before anything is reported as paid. See [docs/threat-model.md](docs/threat-mode
 ## Layout
 ```
 masr_pay_mcp/server.py                     the four MCP tools
+masr_pay_mcp/web.py                        the hosted server (Streamable HTTP, for Lambda)
 masr_pay_mcp/core/confirm.py               stateless HMAC confirmation tokens
 masr_pay_mcp/core/audit.py                 one structured audit line per tool call
 masr_pay_mcp/core/guardrails.py            payment limit, refund cap
@@ -56,6 +57,10 @@ masr_pay_mcp/providers/fawry/signatures.py Fawry SHA-256 signature recipes, one 
 mock_fawry/                                FastAPI mock of Fawry staging (in-memory orders)
 tests/                                     pytest; tests/vectors.json holds our own signature vectors
 scripts/demo.py                            milestone demo over real stdio
+scripts/smoke_remote.py                    the same story against the deployed stack
+infra/template.yaml                        SAM: Lambda + API Gateway, secret, logs, IAM
+infra/ci-bootstrap.yaml                    one-time: GitHub OIDC deploy role, boundary, bucket
+.github/workflows/ci.yml                   lint, tests, pip-audit, cfn-lint; deploy on main
 docs/decisions.md                          why things are the way they are, plus the "verify" list
 docs/threat-model.md                       threats and the code that mitigates each
 docs/inspector.md                          MCP Inspector walkthrough
@@ -101,9 +106,41 @@ a desktop AI app entry, pointed at the local mock:
 | `MASR_PAY_ENABLE_DESTRUCTIVE_TOOLS` | `true` adds `cancel_unpaid_payment` and `refund_payment`. Default off. |
 | `MASR_PAY_MAX_PAYMENT_EGP` | Per-payment limit, default `50000` |
 | `MASR_PAY_MAX_REFUND_EGP` | Per-refund limit, default `2000`. Larger refunds go through Fawry directly. |
-| `MASR_PAY_CONFIRM_SECRET` | HMAC key for confirmation tokens, at least 32 characters. If unset, a random key per process (fine for stdio; required once there are several server instances). |
+| `MASR_PAY_CONFIRM_SECRET` | HMAC key for confirmation tokens, at least 32 characters. If unset, a random key per process (fine for stdio). The HTTP server requires it, or: |
+| `MASR_PAY_CONFIRM_SECRET_ARN` | HTTP server only: read the key from this Secrets Manager secret (what the AWS stack does). |
 
 See [docs/inspector.md](docs/inspector.md) to watch the raw MCP traffic.
+
+## Hosted on AWS
+```
+MCP client --HTTPS--> API Gateway (HTTP API, throttled) --> Lambda: MCP server --> Fawry
+                                                                              \-> mock (demo)
+```
+- **Endpoint:** `POST https://<api-id>.execute-api.eu-west-1.amazonaws.com/mcp` (the stack's
+  `McpUrl` output), Streamable HTTP, stateless.
+- **Credentials go in headers on every request:** `X-Fawry-Merchant-Code` and
+  `X-Fawry-Secure-Key`. They're used for that request and never stored or logged. For the
+  public demo, use the mock's fake merchant: `MOCKMERCHANT0001` /
+  `mock-secure-key-not-a-real-fawry-key`.
+- **The demo mock is public.** Anyone can list its orders (`GET /__admin/orders`), so never put
+  real customer names, phones or emails into it. Use made-up ones, like `01012345678`.
+- **Opening the MCP URL in a browser shows a "use an MCP client" message (HTTP 405).** That's
+  expected: the server only talks to MCP clients, over POST.
+- **Audit log:** CloudWatch log group `/masr-pay-mcp/masr-pay-mcp/mcp`, one JSON line per tool
+  call, kept 30 days.
+- **Cost: about $0.45 a month at demo traffic.** $0.40 of that is the Secrets Manager secret.
+  Lambda stays within the free tier, and API Gateway is about $1 per million requests (eu-west-1
+  prices, checked 2026-10-31).
+
+Deploy:
+```bash
+# once, as an AWS admin: GitHub OIDC deploy role, CloudFormation role, permissions boundary, bucket
+aws cloudformation deploy --template-file infra/ci-bootstrap.yaml \
+  --stack-name masr-pay-mcp-ci --capabilities CAPABILITY_NAMED_IAM
+# then every push to main deploys through GitHub Actions; or by hand:
+sam build && sam deploy --role-arn <CloudFormationRoleArn> --s3-bucket <ArtifactBucketName>
+python scripts/smoke_remote.py <McpUrl> <MockUrl>
+```
 
 ## Run the mock
 ```bash

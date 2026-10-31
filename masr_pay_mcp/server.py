@@ -6,12 +6,13 @@ model: what the tool does, when to use it, units (EGP), and what failures mean.
 
 The tools only use the provider-neutral types in ``core/provider.py``; FawryPay is plugged in
 as ``FawryProvider``. Statelessness: every call loads credentials fresh
-(``config.load_config``) and builds a new provider. Nothing survives between calls.
+(``config.load_config``, from the environment or the HTTP request headers) and builds a
+new provider. Nothing survives between calls.
 """
 
 import logging
 import re
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -345,7 +346,9 @@ def _status_summary(order_id: str, p: Payment) -> str:
 # ----------------------------------------------------------------- server
 def create_server(
     *,
-    config_loader: Callable[[], FawryConfig] = load_config,
+    config_loader: Callable[[Mapping[str, str] | None], FawryConfig] = lambda headers: load_config(
+        headers=headers
+    ),
     transport: httpx2.AsyncBaseTransport | None = None,
     now: Callable[[], datetime] = lambda: datetime.now(UTC),
     confirm_secret: bytes | None = None,
@@ -380,9 +383,9 @@ def create_server(
         version=__version__,
     )
 
-    def provider() -> PaymentProvider:
-        # Fresh every call: no credentials kept between calls.
-        return FawryProvider(config_loader(), transport=transport)
+    def provider(ctx: Context) -> PaymentProvider:
+        # Fresh every call: no credentials kept between calls. ctx.headers is None over stdio.
+        return FawryProvider(config_loader(ctx.headers), transport=transport)
 
     # ------------------------------------------------------------ create
     @mcp.tool(
@@ -441,7 +444,7 @@ def create_server(
             except guardrails.GuardrailError as exc:
                 raise ToolError(str(exc)) from exc
             with _provider_errors(order_id):
-                fawry = provider()
+                fawry = provider(ctx)
                 environment = fawry.environment
                 await _refuse_duplicate(fawry, order_id)
                 payment = await fawry.create_payment(
@@ -497,7 +500,7 @@ def create_server(
                 not_found=f"No Fawry payment exists for order {order_id}. Check the order id, or create one.",
             ),
         ):
-            fawry = provider()
+            fawry = provider(ctx)
             environment = fawry.environment
             p = await fawry.get_status(order_id)
             entry.update(raw_status=p.raw_status, environment=environment)
@@ -566,7 +569,7 @@ def create_server(
                 order_id,
                 not_found=f"No Fawry payment exists for order {order_id}, so there's nothing to cancel.",
             ):
-                fawry = provider()
+                fawry = provider(ctx)
                 environment = fawry.environment
                 before = await fawry.get_status(order_id)
             if not before.is_awaiting_payment:
@@ -659,7 +662,7 @@ def create_server(
                 )
             _check_human_answer(answer)
             with _provider_errors(order_id):
-                fawry = provider()
+                fawry = provider(ctx)
                 environment = fawry.environment
                 await fawry.cancel(plan.payment, language=_LANGUAGE[language])
                 after = await fawry.get_status(order_id)
@@ -703,7 +706,7 @@ def create_server(
                 order_id,
                 not_found=f"No Fawry payment exists for order {order_id}, so there's nothing to refund.",
             ):
-                fawry = provider()
+                fawry = provider(ctx)
                 environment = fawry.environment
                 before = await fawry.get_status(order_id)
             if before.status == "refunded":
@@ -816,7 +819,7 @@ def create_server(
                 )
             _check_human_answer(answer)
             with _provider_errors(order_id):
-                fawry = provider()
+                fawry = provider(ctx)
                 environment = fawry.environment
                 await fawry.refund(plan.payment, amount=amount, reason=reason)
                 after = await fawry.get_status(order_id)

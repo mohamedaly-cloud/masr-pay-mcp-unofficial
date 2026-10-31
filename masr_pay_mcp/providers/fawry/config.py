@@ -2,8 +2,8 @@
 
 Stateless by design (docs/design.md rule 2): credentials are read fresh for every
 tool call and never cached or stored. In local (stdio) mode they come from
-environment variables. Milestone 3 adds per-request HTTP headers for the
-hosted server.
+environment variables; on the hosted HTTP server they come from each request's
+headers (``X-Fawry-Merchant-Code``, ``X-Fawry-Secure-Key``).
 """
 
 from __future__ import annotations
@@ -19,6 +19,8 @@ BASE_URLS = {
 }
 # The mock is the default so a misconfigured setup can never touch real money.
 DEFAULT_ENVIRONMENT = "mock"
+MERCHANT_CODE_HEADER = "x-fawry-merchant-code"
+SECURE_KEY_HEADER = "x-fawry-secure-key"
 
 
 class ConfigError(RuntimeError):
@@ -39,12 +41,20 @@ class FawryConfig:
     credentials: Credentials
 
 
-def load_config(env: Mapping[str, str] | None = None) -> FawryConfig:
-    """Build the configuration from environment variables.
+def load_config(
+    env: Mapping[str, str] | None = None, headers: Mapping[str, str] | None = None
+) -> FawryConfig:
+    """Build the configuration from environment variables, plus request headers over HTTP.
 
-    FAWRY_MERCHANT_CODE, FAWRY_SECURE_KEY  required
+    FAWRY_MERCHANT_CODE, FAWRY_SECURE_KEY  required (stdio)
     FAWRY_ENV        mock (default) | staging | production
     FAWRY_BASE_URL   overrides the URL picked by FAWRY_ENV (e.g. a mock on another port)
+
+    When ``headers`` is given (the HTTP server), the credentials come only from the
+    X-Fawry-Merchant-Code and X-Fawry-Secure-Key headers, never from the environment, so one
+    merchant can't fall back to credentials meant for another. Where Fawry is (FAWRY_ENV,
+    FAWRY_BASE_URL) is always the operator's choice: a header can't point the server at
+    another URL.
     """
     env = os.environ if env is None else env
     environment = env.get("FAWRY_ENV", DEFAULT_ENVIRONMENT).strip().lower()
@@ -52,21 +62,20 @@ def load_config(env: Mapping[str, str] | None = None) -> FawryConfig:
         raise ConfigError(f"FAWRY_ENV must be one of {', '.join(BASE_URLS)}; got {environment!r}.")
     base_url = (env.get("FAWRY_BASE_URL") or BASE_URLS[environment]).rstrip("/")
 
-    merchant_code = env.get("FAWRY_MERCHANT_CODE", "").strip()
-    secure_key = env.get("FAWRY_SECURE_KEY", "").strip()
+    if headers is None:
+        source, code_name, key_name = env, "FAWRY_MERCHANT_CODE", "FAWRY_SECURE_KEY"
+        where = "the MCP server's environment"
+    else:
+        source = {k.lower(): v for k, v in headers.items()}
+        code_name, key_name = MERCHANT_CODE_HEADER, SECURE_KEY_HEADER
+        where = "your MCP client's request headers"
+    merchant_code = source.get(code_name, "").strip()
+    secure_key = source.get(key_name, "").strip()
     missing = [
-        name
-        for name, value in (
-            ("FAWRY_MERCHANT_CODE", merchant_code),
-            ("FAWRY_SECURE_KEY", secure_key),
-        )
-        if not value
+        name for name, value in ((code_name, merchant_code), (key_name, secure_key)) if not value
     ]
     if missing:
-        raise ConfigError(
-            f"Missing {' and '.join(missing)}. Set them in the MCP server's environment "
-            "(see README)."
-        )
+        raise ConfigError(f"Missing {' and '.join(missing)}. Set them in {where} (see README).")
     return FawryConfig(
         base_url=base_url,
         environment=environment,

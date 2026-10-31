@@ -31,8 +31,8 @@ def load_secret(env: Mapping[str, str] | None = None) -> bytes:
     env = os.environ if env is None else env
     value = env.get(SECRET_ENV, "").strip()
     if not value:
-        # shortcut: a per-process key is fine for stdio (one process); milestone 3 (Lambda, many
-        # instances) must set MASR_PAY_CONFIRM_SECRET, or tokens fail (closed) across instances.
+        # A per-process key is fine for stdio (one process). The HTTP server (web.py) never gets
+        # here: with many instances, tokens would fail (closed) across them, so it refuses to start.
         return secrets.token_bytes(32)
     if len(value) < MIN_SECRET_LENGTH:
         raise ValueError(f"{SECRET_ENV} must be at least {MIN_SECRET_LENGTH} characters.")
