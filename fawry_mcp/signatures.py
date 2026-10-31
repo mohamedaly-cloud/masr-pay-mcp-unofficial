@@ -14,8 +14,10 @@ Confidence labels match docs/design.md:
   [third-party] single third-party source; still on the verify list
 
 Known traps in Fawry's own docs, deliberately NOT copied here:
-  * the docs' sample signatures don't match the documented recipe, so they
-    are not used as test vectors (see tests/vectors.json);
+  * the docs' sample signatures are placeholders, not hashes of the sample
+    inputs (the same value appears on pages with different inputs), so they
+    are not used as test vectors (see tests/vectors.json). The documented
+    formula itself hasn't been shown to be wrong;
   * the JavaScript sample concatenates merchantCode twice;
   * the Python sample hashes a ``str`` (which fails on Python 3). We always
     ``.encode("utf-8")``.

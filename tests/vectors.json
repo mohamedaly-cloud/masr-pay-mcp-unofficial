@@ -1,5 +1,5 @@
 {
-  "about": "Our own signature test vectors. Each 'plain' string is built by hand from the recipe in docs/design.md, and each 'sha256' was computed with coreutils (printf '%s' \"$plain\" | sha256sum), NOT with fawry_mcp.signatures, so the tests don't just check the code against itself. Fawry's doc sample signatures are deliberately not used: they don't match Fawry's own recipe. The secure key and merchant code are fake.",
+  "about": "Our own signature test vectors. Each 'plain' string is built by hand from the recipe in docs/design.md, and each 'sha256' was computed with coreutils (printf '%s' \"$plain\" | sha256sum), NOT with fawry_mcp.signatures, so the tests don't just check the code against itself. Fawry's doc sample signatures are deliberately not used: they are placeholders, not hashes of the sample inputs (the same value appears on pages with different inputs). The secure key and merchant code are fake.",
   "secure_key": "fake-secure-key-for-tests-only",
   "vectors": [
     {

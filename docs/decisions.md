@@ -117,8 +117,10 @@ switching to `httpx2`.
   instead of just "hash mismatch".
 - **Test vectors are computed outside our code.** Every hash in `tests/vectors.json` came from
   `printf '%s' "$plain" | sha256sum`. If the vectors were generated with `signatures.py`, the
-  tests would only check that the code agrees with itself. Fawry's own doc samples aren't
-  used because they don't match Fawry's recipe (see docs/design.md, "Known traps").
+  tests would only check that the code agrees with itself. Fawry's doc sample signatures
+  aren't used because they're placeholders, not hashes of the sample inputs: the same value
+  appears on pages with different inputs (see docs/design.md, "Known traps"). The documented formula
+  hasn't been shown to be wrong. Re-check against real sandbox responses once we have credentials.
 - **Amounts: `Decimal`, never round.** `format_amount` rejects anything with more than two
   decimals instead of rounding. The signed amount must equal the amount in the body, so a
   silent rounding would just produce a confusing 9946 from Fawry. Floats go through `str()`
