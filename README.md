@@ -48,7 +48,8 @@ masr_pay_mcp/core/confirm.py               stateless HMAC confirmation tokens
 masr_pay_mcp/core/audit.py                 one structured audit line per tool call
 masr_pay_mcp/core/guardrails.py            payment limit, refund cap
 masr_pay_mcp/core/redaction.py             keeps secrets and customer PII out of logs
-masr_pay_mcp/core/provider.py              provider-neutral interface (Fawry switches to it next)
+masr_pay_mcp/core/provider.py              provider-neutral interface the tools use
+masr_pay_mcp/providers/fawry/provider.py   FawryPay behind that interface
 masr_pay_mcp/providers/fawry/client.py     signs requests, verifies responses, normalizes fields
 masr_pay_mcp/providers/fawry/config.py     environment + credentials (read fresh on every call)
 masr_pay_mcp/providers/fawry/signatures.py Fawry SHA-256 signature recipes, one function each

@@ -3,6 +3,20 @@
 Short, plain-English reasons for the non-obvious choices, so each one can be defended in a
 review or an interview. Newest milestone first.
 
+## Milestone 3: AWS deploy
+
+### Provider-neutral core is now wired in
+- **`server.py` only sees `core/provider.py` types** (`PaymentProvider`, `Payment`,
+  `ProviderError` + `ErrorKind`). `providers/fawry/provider.py` (`FawryProvider`) translates:
+  Fawry codes become error kinds (9938 → `NOT_FOUND`, 9901/9946 → `INVALID_CREDENTIALS`, …),
+  and the signature failure and network errors become their neutral twins. `FawryClient` is
+  untouched and keeps the wire format.
+- **Why now:** adding InstaPay via Kashier (on hold) becomes "write `providers/kashier/`", with
+  no rewrite of the tools, which is the architecture docs/design.md asks for. It was done first in
+  milestone 3 so the Lambda handler is built against the final shape.
+- **No API change.** The tools still take Fawry's `en-gb`/`ar-eg` language codes, mapped to the
+  neutral `en`/`ar` at the edge. All 180 tests passed unchanged.
+
 ## Milestone 2: MCP server, stdio
 
 ### SDK and dependencies
@@ -177,10 +191,6 @@ for interviews: redaction needs an end-to-end check against real log output, not
 
 ### Not done in milestone 2 (on purpose)
 - **HTTP transport and per-request credentials from headers:** milestone 3.
-- **Switching the Fawry client and server to `core/provider.py`'s `PaymentProvider`
-  interface:** the interface exists, but the server still calls `FawryClient` directly. That's
-  a pure refactor with no behaviour change, so it's kept as its own PR to keep this one
-  reviewable.
 
 ## Milestone 1: mock, signatures, tests
 
