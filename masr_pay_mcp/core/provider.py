@@ -56,6 +56,7 @@ class PaymentRequest:
     language: Language = "en"
     customer_name: str | None = None
     expires_at: datetime | None = None  # timezone-aware
+    notify_url: str | None = None  # where the provider should report changes to this payment
 
 
 @dataclass(frozen=True)
@@ -138,6 +139,11 @@ class PaymentProvider(ABC):
     @abstractmethod
     def environment(self) -> str:
         """Which environment this instance talks to, e.g. "mock", "staging", "production"."""
+
+    @property
+    @abstractmethod
+    def merchant_id(self) -> str:
+        """The merchant these credentials belong to (not secret), e.g. Fawry's merchant code."""
 
     @abstractmethod
     async def create_payment(self, request: PaymentRequest) -> Payment:

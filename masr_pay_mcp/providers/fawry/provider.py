@@ -75,10 +75,15 @@ class FawryProvider(PaymentProvider):
     def __init__(self, config: FawryConfig, *, transport: httpx2.AsyncBaseTransport | None = None):
         self._client = fawry.FawryClient(config.base_url, config.credentials, transport=transport)
         self._environment = config.environment
+        self._merchant_code = config.credentials.merchant_code
 
     @property
     def environment(self) -> str:
         return self._environment
+
+    @property
+    def merchant_id(self) -> str:
+        return self._merchant_code
 
     async def create_payment(self, request: PaymentRequest) -> Payment:
         with _translated_errors():
@@ -91,6 +96,7 @@ class FawryProvider(PaymentProvider):
                 language=LANGUAGES[request.language],
                 customer_name=request.customer_name,
                 payment_expiry=request.expires_at,
+                order_webhook_url=request.notify_url,
             )
         return _payment(p)
 

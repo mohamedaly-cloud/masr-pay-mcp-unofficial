@@ -20,12 +20,15 @@ Admin endpoints under ``/__admin`` exist only in the mock.
 
 from __future__ import annotations
 
+import logging
 import os
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Annotated, Any, Literal
 
+import httpx2
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
@@ -69,12 +72,24 @@ DEFAULT_MERCHANT_CODE = "MOCKMERCHANT0001"
 DEFAULT_SECURE_KEY = "mock-secure-key-not-a-real-fawry-key"
 
 
+log = logging.getLogger(__name__)
+
+Notifier = Callable[[str, dict[str, Any]], Awaitable[None]]
+
+
+async def post_notification(url: str, payload: dict[str, Any]) -> None:
+    async with httpx2.AsyncClient(timeout=5) as http:
+        (await http.post(url, json=payload)).raise_for_status()
+
+
 @dataclass
 class MockSettings:
     merchant_code: str = DEFAULT_MERCHANT_CODE
     secure_key: str = DEFAULT_SECURE_KEY
     fawry_fees: Decimal = Decimal("0.00")
     clock: Clock = field(default=system_clock_ms)
+    # Called when an order with an orderWebHookUrl is paid, refunded or cancelled.
+    notify: Notifier = post_notification
 
     @classmethod
     def from_env(cls) -> MockSettings:
@@ -317,6 +332,22 @@ def create_app(settings: MockSettings | None = None) -> FastAPI:
             **signed_order_fields(order, "fawryRefNumber"),
         )
 
+    async def notify_merchant(order) -> None:
+        """Like Fawry's server-to-server notification v2: POST the order to its orderWebHookUrl.
+
+        [third-party] field names follow the status v2 response plus ``messageSignature``
+        (verify list V14). Best effort, like any webhook: a failure is logged, never raised.
+        """
+        if not order.order_webhook_url:
+            return
+        fields = signed_order_fields(order, "fawryRefNumber")
+        payload = {"requestId": str(uuid.uuid4()), **fields}
+        payload["messageSignature"] = payload.pop("signature", "")
+        try:
+            await settings.notify(order.order_webhook_url, payload)
+        except Exception as exc:  # the merchant's endpoint being down mustn't break the mock
+            log.warning("notification for order %s failed: %s", order.reference_number, exc)
+
     # ------------------------------------------------------------ 3. refund
     @app.post(REFUND_PATH)
     async def refund(request: Request) -> JSONResponse:
@@ -351,7 +382,7 @@ def create_app(settings: MockSettings | None = None) -> FastAPI:
         # Compared with the order amount: Fawry's fees aren't the merchant's to refund.
         if req.refundAmount > order.order_amount:
             return fawry_result(REFUND_EXCEEDS_PAID)
-        store.refund(order.reference_number, req.refundAmount, req.reason)
+        await notify_merchant(store.refund(order.reference_number, req.refundAmount, req.reason))
         return fawry_result(OK, "ResponseDataModel")
 
     # ------------------------------------------------------------ 4. cancel unpaid
@@ -377,13 +408,14 @@ def create_app(settings: MockSettings | None = None) -> FastAPI:
             return fawry_result(INVALID_SIGNATURE)
         # Assumption (on the verify list): orderRefNo is Fawry's referenceNumber.
         try:
-            store.cancel(req.orderRefNo)
+            cancelled = store.cancel(req.orderRefNo)
         except OrderNotFound:
             return fawry_result(ORDER_NOT_FOUND)
         except InvalidTransition as exc:
             return mock_error(
                 409, f"only UNPAID orders can be cancelled (status is {exc.order.status})"
             )
+        await notify_merchant(cancelled)
         return fawry_result(OK)
 
     # ------------------------------------------------------------ admin (mock only)
@@ -396,6 +428,7 @@ def create_app(settings: MockSettings | None = None) -> FastAPI:
             return mock_error(404, f"no order with referenceNumber {reference_number}")
         except InvalidTransition as exc:
             return mock_error(409, f"only UNPAID orders can be paid (status is {exc.order.status})")
+        await notify_merchant(order)
         return JSONResponse(order.snapshot())
 
     @app.post("/__admin/reset")

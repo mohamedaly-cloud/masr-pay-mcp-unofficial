@@ -153,6 +153,7 @@ class FawryClient:
         language: Language = "en-gb",
         customer_name: str | None = None,
         payment_expiry: datetime | None = None,
+        order_webhook_url: str | None = None,
     ) -> Payment:
         amount_2dp = sig.format_amount(amount)
         body: dict[str, Any] = {
@@ -188,6 +189,9 @@ class FawryClient:
             body["customerName"] = customer_name
         if payment_expiry is not None:
             body["paymentExpiry"] = int(payment_expiry.timestamp() * 1000)
+        if order_webhook_url:
+            # [official] optional charge field; Fawry calls it when the order changes (paid, ...).
+            body["orderWebHookUrl"] = order_webhook_url
 
         data = await self._request("POST", CHARGE_PATH, json=body)
         return self._payment_from(data, ref_field="referenceNumber")

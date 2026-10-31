@@ -27,7 +27,7 @@ from mcp.types import ToolAnnotations
 from pydantic import AfterValidator, BaseModel, BeforeValidator, Field
 
 from masr_pay_mcp import __version__
-from masr_pay_mcp.core import confirm, guardrails
+from masr_pay_mcp.core import confirm, guardrails, notifications
 from masr_pay_mcp.core.audit import audited
 from masr_pay_mcp.core.provider import (
     ErrorKind,
@@ -172,6 +172,13 @@ class PaymentStatus(BaseModel):
     refunded_amount_egp: str | None
     summary: str = Field(description="One-sentence plain-English answer.")
     environment: str
+
+
+class RecentPaymentUpdates(BaseModel):
+    updates: list[PaymentStatus] = Field(
+        description="Orders that changed recently, newest first, each re-checked with Fawry just now."
+    )
+    summary: str
 
 
 class _DestructiveResult(BaseModel):
@@ -355,13 +362,15 @@ def create_server(
     max_payment_egp: Decimal | None = None,
     max_refund_egp: Decimal | None = None,
     enable_destructive_tools: bool | None = None,
+    hints: notifications.HintStore | None = None,
 ) -> MCPServer:
     """Build the MCP server. The keyword arguments exist so tests can point it at the mock.
 
     Settings are read once here, from MASR_PAY_CONFIRM_SECRET, MASR_PAY_MAX_PAYMENT_EGP,
     MASR_PAY_MAX_REFUND_EGP and MASR_PAY_ENABLE_DESTRUCTIVE_TOOLS, so bad values fail at
     startup. cancel_unpaid_payment and refund_payment exist only when destructive tools are
-    enabled (off by default).
+    enabled (off by default). list_recent_payment_updates exists only with a ``hints`` store
+    (the hosted server, which can receive Fawry's notifications).
     """
     secret = confirm_secret if confirm_secret is not None else confirm.load_secret()
     payment_limit = (
@@ -386,6 +395,31 @@ def create_server(
     def provider(ctx: Context) -> PaymentProvider:
         # Fresh every call: no credentials kept between calls. ctx.headers is None over stdio.
         return FawryProvider(config_loader(ctx.headers), transport=transport)
+
+    def notify_url(ctx: Context, merchant_id: str) -> str | None:
+        # Only the hosted server can be reached by Fawry. Its public host is the one the caller
+        # used; a caller who fakes it only misroutes notifications for their own merchant.
+        host = (ctx.headers or {}).get("host")
+        if hints is None or not host or not notifications.MERCHANT_CODE.fullmatch(merchant_id):
+            return None
+        return f"https://{host}{notifications.notify_path(secret, merchant_id)}"
+
+    def status_result(order_id: str, p: Payment, environment: str) -> PaymentStatus:
+        return PaymentStatus(
+            order_id=order_id,
+            reference_number=p.provider_ref,
+            status=p.status,
+            raw_status=p.raw_status,
+            is_paid=p.is_paid,
+            paid_at_utc=_iso_utc(p.paid_at),
+            paid_at_cairo=_iso_cairo(p.paid_at),
+            amount_egp=format_amount(p.order_amount),
+            total_to_pay_egp=format_amount(p.payment_amount),
+            fawry_fees_egp=_egp(p.fees),
+            refunded_amount_egp=_egp(p.refunded_amount),
+            summary=_status_summary(order_id, p),
+            environment=environment,
+        )
 
     # ------------------------------------------------------------ create
     @mcp.tool(
@@ -457,6 +491,7 @@ def create_server(
                         language=_LANGUAGE[language],
                         customer_name=customer_name,
                         expires_at=expires_at,
+                        notify_url=notify_url(ctx, fawry.merchant_id),
                     )
                 )
             entry.update(raw_status=payment.raw_status, environment=environment)
@@ -504,21 +539,60 @@ def create_server(
             environment = fawry.environment
             p = await fawry.get_status(order_id)
             entry.update(raw_status=p.raw_status, environment=environment)
-        return PaymentStatus(
-            order_id=order_id,
-            reference_number=p.provider_ref,
-            status=p.status,
-            raw_status=p.raw_status,
-            is_paid=p.is_paid,
-            paid_at_utc=_iso_utc(p.paid_at),
-            paid_at_cairo=_iso_cairo(p.paid_at),
-            amount_egp=format_amount(p.order_amount),
-            total_to_pay_egp=format_amount(p.payment_amount),
-            fawry_fees_egp=_egp(p.fees),
-            refunded_amount_egp=_egp(p.refunded_amount),
-            summary=_status_summary(order_id, p),
-            environment=environment,
+        return status_result(order_id, p, environment)
+
+    # ------------------------------------------------------------ recent updates (hosted only)
+    async def list_recent_payment_updates(
+        ctx: Context,
+        hours: Annotated[
+            int, Field(ge=1, le=168, description="How far back to look, in hours (max 7 days).")
+        ] = 24,
+    ) -> RecentPaymentUpdates:
+        """List orders whose payment changed recently (e.g. "did anyone pay today?", "any new payments?").
+
+        Fawry notifies this server when a payment created here is paid, refunded or cancelled.
+        This tool lists those orders, newest first (at most 20), and re-checks each one with
+        Fawry right now, so every status shown is current and verified. Use it when the user
+        asks what happened without naming an order; use get_payment_status for one known order.
+        Orders created before notifications were set up, or over 7 days ago, won't appear.
+        """
+        with (
+            audited(
+                "list_recent_payment_updates", request_id=ctx.request_id, order_id="*"
+            ) as entry,
+            _provider_errors("(recent updates)"),
+        ):
+            fawry = provider(ctx)
+            environment = fawry.environment
+            refs = await hints.recent(fawry.merchant_id, now() - timedelta(hours=hours))  # type: ignore[union-attr]  # registered only with a store
+            updates = []
+            for ref in refs:
+                try:
+                    p = await fawry.get_status(ref)
+                except ProviderError as exc:
+                    if exc.kind is ErrorKind.NOT_FOUND:  # a hint for an order Fawry doesn't know
+                        continue
+                    raise
+                updates.append(status_result(ref, p, environment))
+            entry.update(environment=environment, count=len(updates))
+        paid = sum(u.is_paid for u in updates)
+        summary = (
+            f"{len(updates)} order(s) changed in the last {hours} hour(s); {paid} of them paid."
+            if updates
+            else f"No payment updates in the last {hours} hour(s)."
         )
+        return RecentPaymentUpdates(updates=updates, summary=summary)
+
+    if hints is not None:
+        mcp.tool(
+            title="List recent payment updates",
+            annotations=ToolAnnotations(
+                read_only_hint=True,
+                destructive_hint=False,
+                idempotent_hint=True,
+                open_world_hint=True,
+            ),
+        )(list_recent_payment_updates)
 
     # ------------------------------------------------------------ cancel / refund
     # Two steps (docs/design.md "Security and trust" #1). Resolvers run before the tool body:

@@ -57,6 +57,22 @@ Resources:
         PasswordLength: 64
         ExcludePunctuation: true
 
+  # ------------------------------------------------------------------ payment-update hints
+  HintsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      # Only merchant code + order id + time, 7 days (core/notifications.py). No PII, no keys.
+      TableName: !Sub ${AWS::StackName}-payment-hints
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: pk, AttributeType: S }
+        - { AttributeName: sk, AttributeType: S }
+      KeySchema:
+        - { AttributeName: pk, KeyType: HASH }
+        - { AttributeName: sk, KeyType: RANGE }
+      TimeToLiveSpecification: { AttributeName: expires, Enabled: true }
+      SSESpecification: { SSEEnabled: true }
+
   # ------------------------------------------------------------------ MCP server
   McpLogGroup:
     Type: AWS::Logs::LogGroup
@@ -88,6 +104,9 @@ Resources:
               - Effect: Allow # read the one secret it needs
                 Action: secretsmanager:GetSecretValue
                 Resource: !Ref ConfirmSecret
+              - Effect: Allow # add and read hints; it can't scan, update or delete
+                Action: [dynamodb:PutItem, dynamodb:Query]
+                Resource: !GetAtt HintsTable.Arn
 
   McpFunction:
     Type: AWS::Serverless::Function
@@ -111,6 +130,7 @@ Resources:
           MASR_PAY_CONFIRM_SECRET_ARN: !Ref ConfirmSecret
           MASR_PAY_ENABLE_DESTRUCTIVE_TOOLS: !Ref EnableDestructiveTools
           MASR_PAY_MAX_REFUND_EGP: !Ref MaxRefundEgp
+          MASR_PAY_HINTS_TABLE: !Ref HintsTable
       Events:
         Mcp:
           Type: HttpApi
@@ -118,6 +138,12 @@ Resources:
             ApiId: !Ref McpApi
             Path: /mcp
             Method: ANY
+        Notify: # Fawry's server-to-server notifications (URL carries an HMAC; see web.py)
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref McpApi
+            Path: /notify/{merchant}/{token}
+            Method: POST
 
   McpAccessLogGroup:
     Type: AWS::Logs::LogGroup

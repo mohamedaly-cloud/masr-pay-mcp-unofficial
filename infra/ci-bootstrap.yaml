@@ -13,8 +13,8 @@ Description: >-
 #   CloudFormationRole: creates the app's resources, only under masr-pay-mcp names, and may only
 #     create IAM roles named masr-pay-mcp-fn-* that carry the boundary below. The CI roles
 #     here are named masr-pay-mcp-ci-*, out of its reach, so it can't edit them.
-#   Boundary: whatever inline policy a role gets, it can never do more than write its own logs
-#     and read the app's secret. So a bad template can't mint an admin role.
+#   Boundary: whatever inline policy a role gets, it can never do more than write its own logs,
+#     read the app's secret, and add/read rows in the app's tables. So a bad template can't mint an admin role.
 
 Parameters:
   GitHubRepo:
@@ -85,6 +85,9 @@ Resources:
           - Effect: Allow
             Action: secretsmanager:GetSecretValue
             Resource: !Sub arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AppStackName}/*
+          - Effect: Allow
+            Action: [dynamodb:PutItem, dynamodb:Query]
+            Resource: !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AppStackName}-*
 
   CloudFormationRole:
     Type: AWS::IAM::Role
@@ -176,6 +179,20 @@ Resources:
                   - secretsmanager:TagResource
                   - secretsmanager:UntagResource
                 Resource: !Sub arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AppStackName}/*
+              - Sid: HintsTable
+                Effect: Allow
+                Action:
+                  - dynamodb:CreateTable
+                  - dynamodb:DeleteTable
+                  - dynamodb:DescribeTable
+                  - dynamodb:UpdateTable
+                  - dynamodb:DescribeTimeToLive
+                  - dynamodb:UpdateTimeToLive
+                  - dynamodb:DescribeContinuousBackups
+                  - dynamodb:TagResource
+                  - dynamodb:UntagResource
+                  - dynamodb:ListTagsOfResource
+                Resource: !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AppStackName}-*
               - Sid: GenerateSecretValue
                 Effect: Allow
                 Action: secretsmanager:GetRandomPassword
