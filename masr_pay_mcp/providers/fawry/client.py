@@ -35,8 +35,7 @@ PAY_AT_FAWRY = "PayAtFawry"
 Language = Literal["ar-eg", "en-gb"]
 
 # Sources disagree on which status Fawry uses for a fresh order (docs/design.md),
-# so all three mean "awaiting payment".
-AWAITING_PAYMENT_STATUSES = frozenset({"NEW", "UNPAID", "PENDING"})
+# so NEW, UNPAID and PENDING all mean "awaiting payment".
 NORMALIZED_STATUS = {
     "NEW": "awaiting_payment",
     "UNPAID": "awaiting_payment",
@@ -190,7 +189,7 @@ class FawryClient:
             body["paymentExpiry"] = int(payment_expiry.timestamp() * 1000)
 
         data = await self._request("POST", CHARGE_PATH, json=body)
-        return self._payment_from(data, ref_field="referenceNumber")
+        return self._payment_from(data, ref_field="referenceNumber", merchant_ref=merchant_ref_num)
 
     async def get_payment_status(self, merchant_ref_number: str) -> Payment:
         params = {
@@ -203,7 +202,9 @@ class FawryClient:
             ),
         }
         data = await self._request("GET", STATUS_V2_PATH, params=params)
-        return self._payment_from(data, ref_field="fawryRefNumber")
+        return self._payment_from(
+            data, ref_field="fawryRefNumber", merchant_ref=merchant_ref_number
+        )
 
     async def refund(self, *, reference_number: str, amount: Decimal, reason: str) -> None:
         amount_2dp = sig.format_amount(amount)
@@ -275,8 +276,13 @@ class FawryClient:
             )
         return data
 
-    def _payment_from(self, data: dict[str, Any], *, ref_field: str) -> Payment:
+    def _payment_from(self, data: dict[str, Any], *, ref_field: str, merchant_ref: str) -> Payment:
         self._verify_response_signature(data, ref_field=ref_field)
+        # A genuine, signed answer about another order (replayed by someone in the middle) must
+        # not be read as this order's status.
+        answered_ref = str(data.get("merchantRefNumber") or data.get("merchantRefNum"))
+        if answered_ref != merchant_ref:
+            raise ResponseSignatureError("Fawry's response is about a different order.")
         raw_status = str(data.get("orderStatus") or "")
         order_amount = _decimal(data.get("orderAmount"))
         payment_amount = _decimal(data.get("paymentAmount"))
