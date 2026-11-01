@@ -154,5 +154,7 @@ async def test_page_and_bad_reference(make_app):
         transport=httpx2.ASGITransport(app=app), base_url="http://demo"
     ) as http:
         page = await http.get("/")
+        preview = await http.get("/og.png")
+    assert preview.status_code == 200 and preview.headers["content-type"] == "image/png"
     assert page.status_code == 200 and "not affiliated with Fawry" in page.text
     assert (await post(app, "/api/pay", {"reference": "../reset"})).status_code == 400

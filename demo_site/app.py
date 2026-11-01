@@ -32,7 +32,7 @@ from mcp import Client
 from mcp.client.streamable_http import streamable_http_client
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, JSONResponse
+from starlette.responses import FileResponse, HTMLResponse, JSONResponse
 from starlette.routing import Route
 
 log = logging.getLogger("demo_site")
@@ -260,6 +260,9 @@ def create_app(
     return Starlette(
         routes=[
             Route("/", index, methods=["GET"]),
+            Route(
+                "/og.png", lambda r: FileResponse(Path(__file__).parent / "og.png"), methods=["GET"]
+            ),
             Route("/api/chat", chat, methods=["POST"]),
             Route("/api/pay", pay, methods=["POST"]),
         ]
