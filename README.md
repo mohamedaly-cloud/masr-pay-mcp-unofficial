@@ -5,7 +5,10 @@
 [![ci](https://github.com/mohamedaly-cloud/masr-pay-mcp-unofficial/actions/workflows/ci.yml/badge.svg)](https://github.com/mohamedaly-cloud/masr-pay-mcp-unofficial/actions/workflows/ci.yml)
 
 An **unofficial** [MCP](https://modelcontextprotocol.io) server that lets an AI assistant take
-**cash payments in Egypt through FawryPay's Pay-at-Fawry**:
+**cash payments in Egypt through FawryPay's Pay-at-Fawry**.
+
+**[Try it in your browser](https://hdodp82c89.execute-api.eu-west-1.amazonaws.com/)**: chat with Claude while it uses this
+server against a mock of Fawry (fake money, nothing to install). For example:
 
 > **Merchant:** Charge Ahmed 150 EGP for order 42, he'll pay cash.
 > **Assistant:** Done. Ahmed can pay 150.00 EGP at any Fawry outlet with reference **974376251**, before 3 Nov.
@@ -26,8 +29,10 @@ FawryPay's own API and its network of outlets.
 > data or funds.
 
 ## Try the live demo
-A public copy runs on AWS against a **mock** of Fawry (fake merchant, fake money). Point any MCP
-client that supports Streamable HTTP and custom headers at it:
+The quickest way is the [browser page](https://hdodp82c89.execute-api.eu-west-1.amazonaws.com/)
+(Claude Haiku 5.5, limited messages per day). The same public copy runs on AWS against a **mock**
+of Fawry (fake merchant, fake money), so you can also point any MCP client that supports
+Streamable HTTP and custom headers at it:
 
 ```json
 {
