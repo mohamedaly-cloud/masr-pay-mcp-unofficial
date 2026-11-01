@@ -30,7 +30,7 @@ jobs:
       - name: Install (runtime pinned by infra/constraints.txt, tools pinned here)
         run: |
           python -m pip install --upgrade pip==26.2.2
-          pip install --constraint infra/constraints.txt -e ".[mock]" \
+          pip install --constraint infra/constraints.txt -e ".[mock,demo]" \
             pytest==9.2.0 ruff==0.17.3 pip-audit==2.10.1 cfn-lint==1.58.0
       - run: ruff check .
       - run: ruff format --check .
@@ -74,7 +74,8 @@ jobs:
           SAM_CLI_TELEMETRY: "0"
       - name: Smoke test the live stack
         run: |
-          pip install --constraint infra/constraints.txt -e ".[mock]"
+          pip install --constraint infra/constraints.txt -e ".[mock,demo]"
           outputs() { aws cloudformation describe-stacks --stack-name masr-pay-mcp \
             --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue" --output text; }
           python scripts/smoke_remote.py "$(outputs McpUrl)" "$(outputs MockUrl)"
+          curl -fsS -o /dev/null "$(outputs DemoUrl)" # the page loads (no chat: that costs money)

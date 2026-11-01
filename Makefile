@@ -10,3 +10,8 @@ build-McpFunction:
 build-MockFunction:
 	$(PIP) ".[mock]"
 	cp infra/run-mock.sh "$(ARTIFACTS_DIR)/"
+
+build-DemoFunction:
+	$(PIP) ".[demo]"
+	cp -r demo_site "$(ARTIFACTS_DIR)/"
+	cp infra/run-demo.sh "$(ARTIFACTS_DIR)/"
