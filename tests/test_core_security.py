@@ -66,8 +66,10 @@ def test_amount_checks():
     with pytest.raises(guardrails.GuardrailError):
         guardrails.check_payment_amount(Decimal("50000.01"), Decimal("50000"))
     guardrails.check_refund_amount(Decimal("150"), Decimal("150"))
-    with pytest.raises(guardrails.GuardrailError, match=r"order amount is 150\.00"):
+    with pytest.raises(guardrails.GuardrailError, match=r"only 150\.00 EGP"):
         guardrails.check_refund_amount(Decimal("150.01"), Decimal("150"))
+    with pytest.raises(guardrails.GuardrailError, match=r"only 0\.00 EGP"):
+        guardrails.check_refund_amount(Decimal("0"), Decimal("0"))  # fully refunded already
 
 
 def test_refund_limit_and_destructive_switch_from_env():

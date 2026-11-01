@@ -191,6 +191,14 @@ async def test_tampered_response_is_refused(credentials, tamper):
         await client.get_payment_status("ORDER-42")
 
 
+async def test_genuine_response_about_another_order_is_refused(credentials):
+    """A correctly signed "PAID" for ORDER-41, replayed when we asked about ORDER-42."""
+    body = _signed_status_body()  # signed for ORDER-42
+    client = _client_returning(httpx2.Response(200, json=body), credentials)
+    with pytest.raises(ResponseSignatureError, match="different order"):
+        await client.get_payment_status("ORDER-41")
+
+
 async def test_response_missing_fields_is_refused(credentials):
     body = _signed_status_body()
     del body["orderStatus"]

@@ -1,5 +1,7 @@
 # masr-pay-mcp-unofficial
 
+<!-- mcp-name: io.github.mohamedaly-cloud/masr-pay-mcp-unofficial -->
+
 [![ci](https://github.com/mohamedaly-cloud/masr-pay-mcp-unofficial/actions/workflows/ci.yml/badge.svg)](https://github.com/mohamedaly-cloud/masr-pay-mcp-unofficial/actions/workflows/ci.yml)
 
 An **unofficial** [MCP](https://modelcontextprotocol.io) server that lets an AI assistant take
@@ -13,7 +15,7 @@ An **unofficial** [MCP](https://modelcontextprotocol.io) server that lets an AI 
 > **Merchant:** Did Ahmed pay?
 > **Assistant:** Yes, order 42 is paid: 150.00 EGP received on 31 Oct at 22:47.
 
-![Demo: an AI assistant creates a Pay-at-Fawry payment, sees it paid, and refunds it only after the merchant confirms](docs/demo.gif)
+![Demo: an AI assistant creates a Pay-at-Fawry payment, sees it paid, and refunds it only after the merchant confirms](https://raw.githubusercontent.com/mohamedaly-cloud/masr-pay-mcp-unofficial/main/docs/demo.gif)
 
 It's for merchants contracted **directly with FawryPay**, and for the developers and agencies who
 build sales bots for them. Paymob has an official MCP server; Fawry doesn't, so this one talks to
@@ -38,7 +40,7 @@ client that supports Streamable HTTP and custom headers at it:
 }
 ```
 
-Or use [MCP Inspector](docs/inspector.md): transport Streamable HTTP, that URL, those two headers.
+Or use [MCP Inspector](https://github.com/mohamedaly-cloud/masr-pay-mcp-unofficial/blob/main/docs/inspector.md): transport Streamable HTTP, that URL, those two headers.
 
 Then ask your assistant to charge someone, and play the customer paying cash at an outlet:
 ```bash
@@ -80,13 +82,13 @@ sequenceDiagram
   paid on an unverified reply.
 - **Every call is audited:** one JSON line per tool call, with keys, phones and emails redacted.
 - **Least-privilege AWS:** deploys from GitHub without stored keys; each function can touch only
-  its own logs and secret. Details in [docs/threat-model.md](docs/threat-model.md).
+  its own logs and secret. Details in [docs/threat-model.md](https://github.com/mohamedaly-cloud/masr-pay-mcp-unofficial/blob/main/docs/threat-model.md).
 
 ## Status
 v0.1. Four tools, over stdio locally and over Streamable HTTP on AWS Lambda, built on the official
 MCP Python SDK v2 (protocol 2026-07-28). Until FawryPay issues sandbox credentials, everything is
 built and tested against our own mock of the Fawry API. What still needs Fawry's confirmation is
-listed in [docs/decisions.md](docs/decisions.md#verify-list).
+listed in [docs/decisions.md](https://github.com/mohamedaly-cloud/masr-pay-mcp-unofficial/blob/main/docs/decisions.md#verify-list).
 
 ## Tools
 | Tool | What it does | Safety |
@@ -109,16 +111,18 @@ asks the human directly.
 
 Also built in: one redacted JSON **audit line per tool call** (stderr), a **per-payment limit**
 (default 50,000 EGP), refunds capped at the order amount, and Fawry response signatures verified
-before anything is reported as paid. See [docs/threat-model.md](docs/threat-model.md).
+before anything is reported as paid. See [docs/threat-model.md](https://github.com/mohamedaly-cloud/masr-pay-mcp-unofficial/blob/main/docs/threat-model.md).
 
 ## Run it locally
-The server speaks stdio: `python -m masr_pay_mcp`, or the `masr-pay-mcp-unofficial` command. Example
-host entry (the `mcpServers` format most MCP hosts use), pointed at the local mock:
+The server is on PyPI and speaks stdio. With [uv](https://docs.astral.sh/uv/) installed, a host
+runs it with `uvx masr-pay-mcp-unofficial`, no clone needed. Example host entry (the `mcpServers`
+format most MCP hosts use), pointed at the local mock:
 ```json
 {
   "mcpServers": {
     "fawry-unofficial": {
-      "command": "/path/to/repo/.venv/bin/masr-pay-mcp-unofficial",
+      "command": "uvx",
+      "args": ["masr-pay-mcp-unofficial"],
       "env": {
         "FAWRY_ENV": "mock",
         "FAWRY_MERCHANT_CODE": "MOCKMERCHANT0001",
@@ -129,6 +133,9 @@ host entry (the `mcpServers` format most MCP hosts use), pointed at the local mo
   }
 }
 ```
+Start the mock first: `uvx --from "masr-pay-mcp-unofficial[mock]" python -m mock_fawry`. From a
+clone, use `.venv/bin/masr-pay-mcp-unofficial` (or `python -m masr_pay_mcp`) as the command instead.
+
 | Env var | Meaning |
 |---|---|
 | `FAWRY_MERCHANT_CODE`, `FAWRY_SECURE_KEY` | Required. Read on every call, never stored. |
@@ -141,7 +148,7 @@ host entry (the `mcpServers` format most MCP hosts use), pointed at the local mo
 | `MASR_PAY_CONFIRM_SECRET` | HMAC key for confirmation tokens, at least 32 characters. If unset, a random key per process (fine for stdio). The HTTP server requires it, or: |
 | `MASR_PAY_CONFIRM_SECRET_ARN` | HTTP server only: read the key from this Secrets Manager secret (what the AWS stack does). |
 
-See [docs/inspector.md](docs/inspector.md) to watch the raw MCP traffic.
+See [docs/inspector.md](https://github.com/mohamedaly-cloud/masr-pay-mcp-unofficial/blob/main/docs/inspector.md) to watch the raw MCP traffic.
 
 ## Run the local demo
 ```bash
