@@ -286,8 +286,21 @@ async def test_refund_more_than_order_amount_is_refused_before_calling_fawry(ser
         result = await call(
             client, "refund_payment", {"order_id": "42", "reason": "x", "amount_egp": 155}
         )
-    assert "the order amount is 150.00 EGP" in error_text(result)
+    assert "only 150.00 EGP of the order amount is left" in error_text(result)
     assert status_of(mock_app) == "PAID"
+
+
+async def test_refunds_never_add_up_to_more_than_the_order(server, mock_app):
+    """If Fawry keeps a partly refunded order as PAID, only what's left can be refunded."""
+    async with Client(server) as client:
+        ref = await paid_order(client, mock_app)
+        store(mock_app).get_by_reference(ref).refunded_amount = Decimal("100.00")  # still PAID
+        too_much = await call(
+            client, "refund_payment", {"order_id": "42", "reason": "x", "amount_egp": 60}
+        )
+        rest = await call(client, "refund_payment", {"order_id": "42", "reason": "x"})
+    assert "only 50.00 EGP of the order amount is left" in error_text(too_much)
+    assert rest.structured_content["refund_amount_egp"] == "50.00"
 
 
 async def test_refund_unpaid_points_to_cancel(server):

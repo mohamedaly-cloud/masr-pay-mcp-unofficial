@@ -1,0 +1,269 @@
+openapi: 3.1.0
+info:
+  title: FawryPay Pay-at-Fawry endpoints used by masr-pay-mcp-unofficial
+  version: 0.1.0
+  summary: An unofficial, machine-readable description of four FawryPay endpoints.
+  description: |
+    Written by the masr-pay-mcp-unofficial project from FawryPay's public developer docs and
+    tested against our own mock (`mock_fawry/`). **Not published, endorsed or verified by Fawry.**
+
+    Each operation is tagged with how sure we are:
+    - **official**: read directly on FawryPay's developer site.
+    - **secondary**: consistent across several third-party SDKs; the official page wasn't readable.
+    - **third-party**: a single third-party source; still to be verified.
+
+    Open questions are tracked in `docs/decisions.md` ("Verify list").
+
+    **Signatures** are SHA-256, hex-encoded, over the plain concatenation of the listed fields
+    (no separators), with amounts written with exactly two decimals (`150.00`). The merchant's
+    secure key is the last part and is never sent itself. FawryPay's sample signatures on its
+    doc pages are placeholders, not real hashes; `tests/vectors.json` has vectors computed
+    independently with `sha256sum`.
+
+    **Errors** come back as HTTP 200 with a FawryPay `statusCode` other than 200 (see
+    `FawryResult`), so clients must check `statusCode`, not only the HTTP status.
+  license:
+    name: MIT
+    identifier: MIT
+servers:
+  - url: https://atfawry.fawrystaging.com
+    description: FawryPay staging
+  - url: https://www.atfawry.com
+    description: FawryPay production
+  - url: https://ig7kh4i8u8.execute-api.eu-west-1.amazonaws.com
+    description: Public demo mock (fake merchant MOCKMERCHANT0001, fake money)
+# No HTTP-level auth: every request carries a SHA-256 signature made with the merchant's secure key.
+security: []
+tags:
+  - name: official
+    description: Read directly on FawryPay's developer site.
+  - name: secondary
+    description: Consistent across several third-party SDKs; the official page wasn't readable.
+  - name: third-party
+    description: A single third-party source; still to be verified.
+
+paths:
+  /ECommerceWeb/Fawry/payments/charge:
+    post:
+      operationId: createPayAtFawryCharge
+      summary: Create a Pay-at-Fawry reference the customer pays in cash
+      tags: [official]
+      description: |
+        Returns a 9-digit `referenceNumber`. The customer pays it at any Fawry outlet.
+
+        Request signature: `merchantCode + merchantRefNum + customerProfileId + paymentMethod +
+        amount + secureKey` (`customerProfileId` is `""` when absent).
+
+        The response is signed (see `ChargeResponse.signature`) and must be verified.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ChargeRequest" }
+      responses:
+        "200":
+          description: The charge, or a FawryPay error code
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - { $ref: "#/components/schemas/ChargeResponse" }
+                  - { $ref: "#/components/schemas/FawryResult" }
+
+  /ECommerceWeb/Fawry/payments/status/v2:
+    get:
+      operationId: getPaymentStatusV2
+      summary: Get the current status of one order
+      tags: [secondary]
+      description: |
+        Request signature: `merchantCode + merchantRefNumber + secureKey`.
+
+        Note the names: this endpoint takes `merchantRefNumber` and answers with `fawryRefNumber`,
+        while the charge uses `merchantRefNum` and `referenceNumber`.
+
+        Assumed (verify list V2): the response is signed with the charge-response recipe, with
+        `fawryRefNumber` in place of `referenceNumber`.
+      parameters:
+        - { name: merchantCode, in: query, required: true, schema: { type: string } }
+        - { name: merchantRefNumber, in: query, required: true, schema: { type: string } }
+        - { name: signature, in: query, required: true, schema: { $ref: "#/components/schemas/Sha256Hex" } }
+      responses:
+        "200":
+          description: The order, or a FawryPay error code (9938 = order not found)
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - { $ref: "#/components/schemas/PaymentStatusResponse" }
+                  - { $ref: "#/components/schemas/FawryResult" }
+
+  /ECommerceWeb/Fawry/payments/refund:
+    post:
+      operationId: refundPayment
+      summary: Refund a paid order
+      tags: [official, third-party]
+      description: |
+        Endpoint and fields: official. Signature: third-party (verify list V3):
+        `merchantCode + referenceNumber + refundAmount + reason + secureKey`.
+
+        Reported but not confirmed (V5): one refund per payment, rounded down to whole EGP.
+        9954 = the order isn't paid; 9935 = refund larger than the paid amount.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RefundRequest" }
+      responses:
+        "200":
+          description: Done (`statusCode` 200) or a FawryPay error code
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FawryResult" }
+
+  /ECommerceWeb/api/orders/cancel-unpaid-order:
+    post:
+      operationId: cancelUnpaidOrder
+      summary: Cancel a reference before it's paid
+      tags: [third-party]
+      description: |
+        Third-party (verify list V4), including whether `orderRefNo` is FawryPay's
+        `referenceNumber`. Signature: `orderRefNo + merchantAccount + lang + secureKey`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CancelUnpaidRequest" }
+      responses:
+        "200":
+          description: Done (`statusCode` 200) or a FawryPay error code
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FawryResult" }
+
+components:
+  schemas:
+    Sha256Hex:
+      type: string
+      pattern: "^[0-9a-f]{64}$"
+      description: Lowercase hex SHA-256.
+    Amount:
+      type: number
+      exclusiveMinimum: 0
+      multipleOf: 0.01
+      description: EGP, at most two decimals. Signed as text with exactly two (`150.00`).
+    Language:
+      type: string
+      enum: [ar-eg, en-gb]
+    OrderStatus:
+      type: string
+      description: |
+        Seen across sources: NEW, UNPAID, PENDING (all "awaiting payment"), PAID, EXPIRED,
+        CANCELED, REFUNDED, FAILED. Sources disagree on which one a fresh order has.
+      examples: [UNPAID, PAID]
+
+    ChargeItem:
+      type: object
+      required: [itemId, price, quantity]
+      properties:
+        itemId: { type: string }
+        description: { type: string }
+        price: { $ref: "#/components/schemas/Amount" }
+        quantity: { type: integer, minimum: 1 }
+
+    ChargeRequest:
+      type: object
+      required: [merchantCode, merchantRefNum, paymentMethod, customerMobile, customerEmail, amount, description, language, chargeItems, signature]
+      properties:
+        merchantCode: { type: string }
+        merchantRefNum: { type: string, description: The merchant's own unique order reference. }
+        paymentMethod: { type: string, const: PayAtFawry }
+        customerMobile: { type: string, pattern: "^01[0-9]{9}$" }
+        customerEmail: { type: string, format: email }
+        amount: { $ref: "#/components/schemas/Amount" }
+        description: { type: string }
+        language: { $ref: "#/components/schemas/Language" }
+        chargeItems:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/ChargeItem" }
+        signature: { $ref: "#/components/schemas/Sha256Hex" }
+        customerProfileId: { type: string }
+        customerName: { type: string }
+        paymentExpiry: { type: integer, description: Epoch **milliseconds**. }
+        orderWebHookUrl: { type: string, format: uri }
+        currencyCode: { type: string, const: EGP }
+
+    ChargeResponse:
+      type: object
+      description: |
+        Response signature: `referenceNumber (if present) + merchantRefNum + paymentAmount +
+        orderAmount + orderStatus + paymentMethod + fawryFees (if present) + shippingFees (if
+        present) + authNumber (if present) + customerMail (if present) + customerMobile (if
+        present) + secureKey`.
+      properties:
+        type: { type: string, const: ChargeResponse }
+        referenceNumber: { type: string, pattern: "^[0-9]{9}$" }
+        merchantRefNumber: { type: string }
+        orderAmount: { $ref: "#/components/schemas/Amount" }
+        paymentAmount: { $ref: "#/components/schemas/Amount" }
+        fawryFees: { type: number }
+        paymentMethod: { type: string }
+        orderStatus: { $ref: "#/components/schemas/OrderStatus" }
+        paymentTime: { type: integer, description: Epoch milliseconds. }
+        customerMobile: { type: string }
+        customerMail: { type: string }
+        customerProfileId: { type: string }
+        signature: { $ref: "#/components/schemas/Sha256Hex" }
+        statusCode: { type: integer, const: 200 }
+        statusDescription: { type: string }
+
+    PaymentStatusResponse:
+      type: object
+      properties:
+        type: { type: string, const: PaymentStatusResponse }
+        requestId: { type: string }
+        fawryRefNumber: { type: string }
+        merchantRefNumber: { type: string }
+        orderAmount: { $ref: "#/components/schemas/Amount" }
+        paymentAmount: { $ref: "#/components/schemas/Amount" }
+        fawryFees: { type: number }
+        paymentMethod: { type: string }
+        orderStatus: { $ref: "#/components/schemas/OrderStatus" }
+        paymentTime: { type: integer, description: "Epoch milliseconds (assumed, V11)." }
+        refundedAmount: { type: number, description: "After a refund (assumed, V11)." }
+        customerMobile: { type: string }
+        customerMail: { type: string }
+        signature: { $ref: "#/components/schemas/Sha256Hex" }
+        statusCode: { type: integer, const: 200 }
+        statusDescription: { type: string }
+
+    RefundRequest:
+      type: object
+      required: [merchantCode, referenceNumber, refundAmount, signature]
+      properties:
+        merchantCode: { type: string }
+        referenceNumber: { type: string, description: "FawryPay's reference, not the merchant's." }
+        refundAmount: { $ref: "#/components/schemas/Amount" }
+        reason: { type: string }
+        signature: { $ref: "#/components/schemas/Sha256Hex" }
+
+    CancelUnpaidRequest:
+      type: object
+      required: [merchantAccount, orderRefNo, lang, signature]
+      properties:
+        merchantAccount: { type: string, description: The merchant code. }
+        orderRefNo: { type: string }
+        lang: { $ref: "#/components/schemas/Language" }
+        signature: { $ref: "#/components/schemas/Sha256Hex" }
+
+    FawryResult:
+      type: object
+      required: [statusCode]
+      description: |
+        Official codes: 200 done; 9901 merchant code blank or invalid; 9938 order not found;
+        9946 blank or invalid signature; 9935 refunded amount greater than paid amount;
+        9954 order is not paid.
+      properties:
+        type: { type: string }
+        statusCode: { type: integer, examples: [200, 9901, 9938, 9946, 9935, 9954] }
+        statusDescription: { type: string }

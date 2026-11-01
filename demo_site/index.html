@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Try it: AI cash payments with Fawry (unofficial demo)</title>
+<meta name="description" content="Chat with an AI that takes Pay-at-Fawry cash payments through an MCP server. Fake money, unofficial demo.">
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --text: #16181d; --muted: #5b6270; --line: #e2e5ea;
+    --accent: #0b6e4f; --accent-text: #ffffff; --me: #e8f3ee; --warn: #8a4b00; --warn-bg: #fff4e0;
+    --code: #f0f2f5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111317; --panel: #191c21; --text: #e9ebef; --muted: #9aa1ad; --line: #2b2f37;
+      --accent: #3fbf8f; --accent-text: #08130e; --me: #1d2b25; --warn: #ffc56b; --warn-bg: #2b2214;
+      --code: #22262d;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans Arabic", sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 24px 16px 40px; }
+  h1 { font-size: 1.5rem; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 16px; font-size: .95rem; }
+  .badge { display: inline-block; background: var(--warn-bg); color: var(--warn); border-radius: 6px;
+    padding: 2px 8px; font-size: .8rem; font-weight: 600; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
+  #log { padding: 16px; min-height: 280px; max-height: 60vh; overflow-y: auto; display: flex;
+    flex-direction: column; gap: 10px; }
+  .msg { max-width: 85%; padding: 10px 14px; border-radius: 12px; white-space: pre-wrap;
+    overflow-wrap: anywhere; unicode-bidi: plaintext; }
+  .ai { background: var(--bg); align-self: flex-start; }
+  .me { background: var(--me); align-self: flex-end; }
+  .note { align-self: center; color: var(--muted); font-size: .85rem; text-align: center; }
+  .err { align-self: center; color: var(--warn); background: var(--warn-bg); }
+  .tool { align-self: flex-start; font-size: .85rem; color: var(--muted); }
+  .tool summary { cursor: pointer; }
+  .tool pre { background: var(--code); padding: 8px; border-radius: 8px; overflow-x: auto;
+    max-width: 100%; white-space: pre-wrap; overflow-wrap: anywhere; margin: 6px 0 0; }
+  .pay { align-self: flex-start; }
+  form { display: flex; gap: 8px; padding: 12px; border-top: 1px solid var(--line); }
+  input { flex: 1; min-width: 0; font: inherit; padding: 10px 12px; border-radius: 8px;
+    border: 1px solid var(--line); background: var(--bg); color: var(--text); }
+  button { font: inherit; border: 0; border-radius: 8px; padding: 10px 14px; cursor: pointer;
+    background: var(--accent); color: var(--accent-text); font-weight: 600; }
+  button.ghost { background: transparent; color: var(--accent); border: 1px solid var(--line); }
+  button:disabled { opacity: .5; cursor: default; }
+  button:focus-visible, input:focus-visible, summary:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+  .chips button { background: var(--panel); color: var(--text); border: 1px solid var(--line);
+    font-weight: 400; font-size: .9rem; padding: 6px 10px; }
+  .row { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 12px; }
+  footer { color: var(--muted); font-size: .85rem; margin-top: 20px; }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Try it: an AI takes a cash payment through Fawry</h1>
+  <p class="sub">
+    You run a small shop. Ask the assistant to charge a customer; they get a Fawry reference to pay
+    in cash at any Fawry outlet. Refunds need your "yes" first.
+    <span class="badge">Unofficial demo · fake money · not affiliated with Fawry</span>
+  </p>
+
+  <div class="chips" aria-label="Examples">
+    <button type="button">Charge Ahmed 150 EGP for order 42, he'll pay cash</button>
+    <button type="button">Did Ahmed pay for order 42?</button>
+    <button type="button">Refund order 42, the item came back</button>
+    <button type="button" dir="rtl" lang="ar">اعمل دفع لأحمد بـ ٢٠٠ جنيه للطلب ٤٣</button>
+  </div>
+
+  <section class="panel">
+    <div id="log" role="log" aria-live="polite" aria-label="Chat"></div>
+    <form id="form">
+      <input id="text" aria-label="Message" autocomplete="off" maxlength="500" placeholder="Type a message, in English or Arabic">
+      <button id="send">Send</button>
+    </form>
+  </section>
+
+  <div class="row">
+    <button type="button" class="ghost" id="reset">New chat</button>
+    <span class="sub" style="margin:0">Each chat gets its own orders. Limited messages per day.</span>
+  </div>
+
+  <footer>
+    How it works: Claude calls the four tools of
+    <a href="https://github.com/mohamedaly-cloud/masr-pay-mcp-unofficial">masr-pay-mcp-unofficial</a>
+    (an MCP server, <a href="https://pypi.org/project/masr-pay-mcp-unofficial/">on PyPI</a>) running on AWS Lambda,
+    which talks to a mock of Fawry's API. Open "tool call" lines to see each request and answer.
+  </footer>
+</main>
+<script>
+(() => {
+  const log = document.getElementById("log");
+  const form = document.getElementById("form");
+  const input = document.getElementById("text");
+  const send = document.getElementById("send");
+  let session, history, busy = false;
+
+  function newSession() {
+    const abc = "abcdefghijklmnopqrstuvwxyz0123456789";
+    const bytes = crypto.getRandomValues(new Uint8Array(8));
+    session = Array.from(bytes, b => abc[b % abc.length]).join("");
+    history = [];
+    log.replaceChildren();
+    add("note", "New chat. Try one of the examples above.");
+  }
+
+  function add(kind, text) {
+    const el = document.createElement("div");
+    el.className = "msg " + kind;
+    el.textContent = text;
+    log.appendChild(el);
+    log.scrollTop = log.scrollHeight;
+    return el;
+  }
+
+  function addTool(step) {
+    const d = document.createElement("details");
+    d.className = "tool";
+    const s = document.createElement("summary");
+    s.textContent = (step.ok ? "✓ " : "✗ ") + "tool call: " + step.tool;
+    const pre = document.createElement("pre");
+    pre.textContent = "arguments: " + JSON.stringify(step.args, null, 2) +
+      "\n\nanswer: " + JSON.stringify(step.result, null, 2);
+    d.append(s, pre);
+    log.appendChild(d);
+    const ref = step.ok && step.tool === "create_cash_payment" && step.result && step.result.reference_number;
+    if (ref) addPayButton(ref, step.result.total_to_pay_egp);
+  }
+
+  function addPayButton(ref, total) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "pay";
+    b.textContent = "Pretend the customer pays " + total + " EGP at a Fawry outlet (ref " + ref + ")";
+    b.addEventListener("click", async () => {
+      b.disabled = true;
+      const r = await fetch("/api/pay", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reference: ref }) }).catch(() => null);
+      if (r && r.ok) add("note", "The customer paid in cash at a Fawry outlet. Now ask: did they pay?");
+      else { add("err", "That reference can't be paid now."); b.disabled = false; }
+    });
+    log.appendChild(b);
+  }
+
+  async function ask(text) {
+    if (busy || !text.trim()) return;
+    busy = true; send.disabled = true;
+    add("me", text);
+    input.value = "";
+    const thinking = add("note", "Thinking…");
+    try {
+      const r = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session, text, history }) });
+      const data = await r.json().catch(() => ({}));
+      thinking.remove();
+      if (!r.ok) { add("err", data.error || "Something went wrong. Try again."); return; }
+      history = data.history;
+      (data.steps || []).forEach(addTool);
+      if (data.reply) add("ai", data.reply.replace(/\*\*(.+?)\*\*/g, "$1"));
+    } catch {
+      thinking.remove();
+      add("err", "Couldn't reach the demo. Check your connection and try again.");
+    } finally {
+      busy = false; send.disabled = false; input.focus();
+    }
+  }
+
+  form.addEventListener("submit", e => { e.preventDefault(); ask(input.value); });
+  document.querySelectorAll(".chips button").forEach(b => b.addEventListener("click", () => ask(b.textContent)));
+  document.getElementById("reset").addEventListener("click", newSession);
+  newSession();
+})();
+</script>
+</body>
+</html>

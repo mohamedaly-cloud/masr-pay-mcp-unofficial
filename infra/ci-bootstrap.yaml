@@ -88,6 +88,9 @@ Resources:
           - Effect: Allow
             Action: secretsmanager:GetSecretValue
             Resource: !Sub arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AppStackName}/*
+          - Effect: Allow # the "try it" page's daily message counter
+            Action: dynamodb:UpdateItem
+            Resource: !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AppStackName}-*
 
   CloudFormationRole:
     Type: AWS::IAM::Role
@@ -128,6 +131,9 @@ Resources:
                   - lambda:TagResource
                   - lambda:UntagResource
                   - lambda:ListTags
+                  - lambda:PutFunctionConcurrency # the mock runs as exactly one copy
+                  - lambda:DeleteFunctionConcurrency
+                  - lambda:GetFunctionConcurrency
                 Resource: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${AppStackName}-*
               - Sid: WebAdapterLayer
                 Effect: Allow
@@ -179,6 +185,21 @@ Resources:
                   - secretsmanager:TagResource
                   - secretsmanager:UntagResource
                 Resource: !Sub arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AppStackName}/*
+              - Sid: Tables # the "try it" page's usage table, by name prefix
+                Effect: Allow
+                Action:
+                  - dynamodb:CreateTable
+                  - dynamodb:DeleteTable
+                  - dynamodb:UpdateTable
+                  - dynamodb:UpdateTimeToLive
+                  - dynamodb:UpdateContinuousBackups
+                  - dynamodb:UpdateContributorInsights
+                  - dynamodb:TagResource
+                  - dynamodb:UntagResource
+                  - dynamodb:Describe*
+                  - dynamodb:List*
+                  - dynamodb:GetResourcePolicy
+                Resource: !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AppStackName}-*
               - Sid: GenerateSecretValue
                 Effect: Allow
                 Action: secretsmanager:GetRandomPassword

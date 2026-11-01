@@ -1,85 +1,142 @@
 annotated-doc==0.0.5
-    # via fastapi
+    # via
+    #   -c /tmp/claude-1000/-home-evild-Masr-MCP/d382d448-7860-4eb6-b59c-2ee676b25347/scratchpad/constraints.old
+    #   fastapi
 annotated-types==0.8.0
-    # via pydantic
+    # via
+    #   -c /tmp/claude-1000/-home-evild-Masr-MCP/d382d448-7860-4eb6-b59c-2ee676b25347/scratchpad/constraints.old
+    #   pydantic
+anthropic==1.15.0
+    # via masr-pay-mcp-unofficial (pyproject.toml)
 anyio==4.15.1
     # via
+    #   -c /tmp/claude-1000/-home-evild-Masr-MCP/d382d448-7860-4eb6-b59c-2ee676b25347/scratchpad/constraints.old
+    #   anthropic
     #   httpx2
     #   mcp
     #   sse-starlette
     #   starlette
 attrs==26.1.0
     # via
+    #   -c /tmp/claude-1000/-home-evild-Masr-MCP/d382d448-7860-4eb6-b59c-2ee676b25347/scratchpad/constraints.old
     #   jsonschema
     #   referencing
 cffi==2.1.1
-    # via cryptography
+    # via
+    #   -c /tmp/claude-1000/-home-evild-Masr-MCP/d382d448-7860-4eb6-b59c-2ee676b25347/scratchpad/constraints.old
+    #   cryptography
 click==8.5.0
-    # via uvicorn
+    # via
+    #   -c /tmp/claude-1000/-home-evild-Masr-MCP/d382d448-7860-4eb6-b59c-2ee676b25347/scratchpad/constraints.old
+    #   uvicorn
 cryptography==50.0.2
-    # via pyjwt
+    # via
+    #   -c /tmp/claude-1000/-home-evild-Masr-MCP/d382d448-7860-4eb6-b59c-2ee676b25347/scratchpad/constraints.old
+    #   pyjwt
+docstring-parser==0.18.0
+    # via anthropic
 fastapi==0.162.0
-    # via masr-pay-mcp-unofficial (pyproject.toml)
+    # via
+    #   -c /tmp/claude-1000/-home-evild-Masr-MCP/d382d448-7860-4eb6-b59c-2ee676b25347/scratchpad/constraints.old
+    #   masr-pay-mcp-unofficial (pyproject.toml)
 h11==0.16.0
     # via
+    #   -c /tmp/claude-1000/-home-evild-Masr-MCP/d382d448-7860-4eb6-b59c-2ee676b25347/scratchpad/constraints.old
     #   httpcore2
     #   uvicorn
 httpcore2==2.16.0
-    # via httpx2
+    # via
+    #   -c /tmp/claude-1000/-home-evild-Masr-MCP/d382d448-7860-4eb6-b59c-2ee676b25347/scratchpad/constraints.old
+    #   httpx2
 httpx2==2.16.0
     # via
+    #   -c /tmp/claude-1000/-home-evild-Masr-MCP/d382d448-7860-4eb6-b59c-2ee676b25347/scratchpad/constraints.old
     #   masr-pay-mcp-unofficial (pyproject.toml)
+    #   anthropic
     #   mcp
 idna==3.20
     # via
+    #   -c /tmp/claude-1000/-home-evild-Masr-MCP/d382d448-7860-4eb6-b59c-2ee676b25347/scratchpad/constraints.old
     #   anyio
     #   httpx2
+jiter==0.18.0
+    # via anthropic
 jsonschema==4.26.0
-    # via mcp
+    # via
+    #   -c /tmp/claude-1000/-home-evild-Masr-MCP/d382d448-7860-4eb6-b59c-2ee676b25347/scratchpad/constraints.old
+    #   mcp
 jsonschema-specifications==2025.9.1
-    # via jsonschema
+    # via
+    #   -c /tmp/claude-1000/-home-evild-Masr-MCP/d382d448-7860-4eb6-b59c-2ee676b25347/scratchpad/constraints.old
+    #   jsonschema
 mcp==2.3.0
-    # via masr-pay-mcp-unofficial (pyproject.toml)
+    # via
+    #   -c /tmp/claude-1000/-home-evild-Masr-MCP/d382d448-7860-4eb6-b59c-2ee676b25347/scratchpad/constraints.old
+    #   masr-pay-mcp-unofficial (pyproject.toml)
 mcp-types==2.3.0
-    # via mcp
+    # via
+    #   -c /tmp/claude-1000/-home-evild-Masr-MCP/d382d448-7860-4eb6-b59c-2ee676b25347/scratchpad/constraints.old
+    #   mcp
 opentelemetry-api==1.45.2
     # via
+    #   -c /tmp/claude-1000/-home-evild-Masr-MCP/d382d448-7860-4eb6-b59c-2ee676b25347/scratchpad/constraints.old
+    #   anthropic
     #   fastapi
     #   mcp
 pycparser==3.12
-    # via cffi
+    # via
+    #   -c /tmp/claude-1000/-home-evild-Masr-MCP/d382d448-7860-4eb6-b59c-2ee676b25347/scratchpad/constraints.old
+    #   cffi
 pydantic==2.14.2
     # via
+    #   -c /tmp/claude-1000/-home-evild-Masr-MCP/d382d448-7860-4eb6-b59c-2ee676b25347/scratchpad/constraints.old
+    #   anthropic
     #   fastapi
     #   mcp
     #   mcp-types
 pydantic-core==2.50.2
-    # via pydantic
+    # via
+    #   -c /tmp/claude-1000/-home-evild-Masr-MCP/d382d448-7860-4eb6-b59c-2ee676b25347/scratchpad/constraints.old
+    #   pydantic
 pyjwt==2.15.1
-    # via mcp
+    # via
+    #   -c /tmp/claude-1000/-home-evild-Masr-MCP/d382d448-7860-4eb6-b59c-2ee676b25347/scratchpad/constraints.old
+    #   mcp
 python-multipart==0.0.33
-    # via mcp
+    # via
+    #   -c /tmp/claude-1000/-home-evild-Masr-MCP/d382d448-7860-4eb6-b59c-2ee676b25347/scratchpad/constraints.old
+    #   mcp
 referencing==0.37.0
     # via
+    #   -c /tmp/claude-1000/-home-evild-Masr-MCP/d382d448-7860-4eb6-b59c-2ee676b25347/scratchpad/constraints.old
     #   jsonschema
     #   jsonschema-specifications
 rpds-py==2026.9.1
     # via
+    #   -c /tmp/claude-1000/-home-evild-Masr-MCP/d382d448-7860-4eb6-b59c-2ee676b25347/scratchpad/constraints.old
     #   jsonschema
     #   referencing
+sniffio==1.3.1
+    # via anthropic
 sse-starlette==3.6.0
-    # via mcp
+    # via
+    #   -c /tmp/claude-1000/-home-evild-Masr-MCP/d382d448-7860-4eb6-b59c-2ee676b25347/scratchpad/constraints.old
+    #   mcp
 starlette==1.10.0
     # via
+    #   -c /tmp/claude-1000/-home-evild-Masr-MCP/d382d448-7860-4eb6-b59c-2ee676b25347/scratchpad/constraints.old
     #   fastapi
     #   mcp
     #   sse-starlette
 truststore==0.10.5
     # via
+    #   -c /tmp/claude-1000/-home-evild-Masr-MCP/d382d448-7860-4eb6-b59c-2ee676b25347/scratchpad/constraints.old
     #   httpcore2
     #   httpx2
 typing-extensions==4.16.0
     # via
+    #   -c /tmp/claude-1000/-home-evild-Masr-MCP/d382d448-7860-4eb6-b59c-2ee676b25347/scratchpad/constraints.old
+    #   anthropic
     #   anyio
     #   fastapi
     #   httpx2
@@ -93,10 +150,12 @@ typing-extensions==4.16.0
     #   typing-inspection
 typing-inspection==0.4.4
     # via
+    #   -c /tmp/claude-1000/-home-evild-Masr-MCP/d382d448-7860-4eb6-b59c-2ee676b25347/scratchpad/constraints.old
     #   fastapi
     #   mcp
     #   pydantic
 uvicorn==0.54.0
     # via
+    #   -c /tmp/claude-1000/-home-evild-Masr-MCP/d382d448-7860-4eb6-b59c-2ee676b25347/scratchpad/constraints.old
     #   masr-pay-mcp-unofficial (pyproject.toml)
     #   mcp

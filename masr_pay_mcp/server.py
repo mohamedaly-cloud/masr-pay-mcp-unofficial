@@ -720,9 +720,11 @@ def create_server(
                     f"Order {order_id} can't be refunded: it isn't paid (status {before.status}).{hint} "
                     "Nothing was changed."
                 )
-            amount = amount_egp if amount_egp is not None else before.order_amount
+            # Fawry reportedly allows one refund per payment (unverified), so count earlier ones.
+            refundable = before.order_amount - (before.refunded_amount or 0)
+            amount = amount_egp if amount_egp is not None else refundable
             try:
-                guardrails.check_refund_amount(amount, before.order_amount)
+                guardrails.check_refund_amount(amount, refundable)
                 guardrails.check_refund_limit(amount, refund_limit)
             except guardrails.GuardrailError as exc:
                 raise ToolError(str(exc)) from exc

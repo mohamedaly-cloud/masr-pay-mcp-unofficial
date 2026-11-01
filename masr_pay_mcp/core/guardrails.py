@@ -64,12 +64,13 @@ def check_payment_amount(amount: Decimal, limit: Decimal) -> None:
         )
 
 
-def check_refund_amount(amount: Decimal, order_amount: Decimal) -> None:
-    """A refund can never exceed the order amount (Fawry's fees aren't refundable: verify V6)."""
-    if amount > order_amount:
+def check_refund_amount(amount: Decimal, refundable: Decimal) -> None:
+    """Refunds can never add up to more than the order amount (Fawry's fees aren't refundable:
+    verify V6). ``refundable`` is the order amount minus anything already refunded."""
+    if not 0 < amount <= refundable:  # 0: a full refund with nothing left
         raise GuardrailError(
-            f"Can't refund {amount:.2f} EGP: the order amount is {order_amount:.2f} EGP. "
-            "Nothing was changed."
+            f"Can't refund {amount:.2f} EGP: only {refundable:.2f} EGP of the order amount is "
+            "left to refund. Nothing was changed."
         )
 
 

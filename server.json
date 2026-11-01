@@ -1,0 +1,48 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.mohamedaly-cloud/masr-pay-mcp-unofficial",
+  "title": "FawryPay cash payments (unofficial)",
+  "description": "Unofficial MCP server for FawryPay Pay-at-Fawry cash payments in Egypt. Not affiliated with Fawry.",
+  "repository": {
+    "url": "https://github.com/mohamedaly-cloud/masr-pay-mcp-unofficial",
+    "source": "github"
+  },
+  "version": "0.1.0",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "masr-pay-mcp-unofficial",
+      "version": "0.1.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "FAWRY_MERCHANT_CODE",
+          "description": "Your FawryPay merchant code",
+          "isRequired": true,
+          "format": "string"
+        },
+        {
+          "name": "FAWRY_SECURE_KEY",
+          "description": "Your FawryPay secure key",
+          "isRequired": true,
+          "isSecret": true,
+          "format": "string"
+        },
+        {
+          "name": "FAWRY_ENV",
+          "description": "mock (default), staging or production",
+          "default": "mock",
+          "format": "string"
+        },
+        {
+          "name": "MASR_PAY_ENABLE_DESTRUCTIVE_TOOLS",
+          "description": "true adds refund and cancel tools (merchant staff only). Default off.",
+          "default": "false",
+          "format": "string"
+        }
+      ]
+    }
+  ]
+}
