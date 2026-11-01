@@ -24,6 +24,13 @@ Parameters:
     Type: Number
     Default: 2000
     MinValue: 1
+  DemoDailyMessages:
+    Type: Number
+    Default: 400
+    MinValue: 0
+    Description: >-
+      Chat messages the public "try it" page accepts per day (UTC), across all visitors. Each
+      costs about $0.001-0.003 with Claude Haiku 5.5, so 400 is roughly $1 a day at most.
   LogRetentionDays:
     Type: Number
     Default: 30
@@ -200,7 +207,105 @@ Resources:
         ThrottlingRateLimit: 10
         ThrottlingBurstLimit: 20
 
+  # ------------------------------------------------------------------ "try it" page (Claude + MCP)
+  AnthropicApiKey:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub ${AWS::StackName}/anthropic-api-key
+      Description: >-
+        Claude API key for the "try it" page. Created with a placeholder; set the real key once
+        with `aws secretsmanager put-secret-value` (CloudFormation never overwrites it).
+      GenerateSecretString:
+        PasswordLength: 32
+        ExcludePunctuation: true
+
+  DemoUsageTable: # one item per day: how many chat messages the page has answered
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub ${AWS::StackName}-demo-usage
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions: [{ AttributeName: day, AttributeType: S }]
+      KeySchema: [{ AttributeName: day, KeyType: HASH }]
+      TimeToLiveSpecification: { AttributeName: expires, Enabled: true }
+
+  DemoLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /masr-pay-mcp/${AWS::StackName}/demo
+      RetentionInDays: 7
+
+  DemoRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${AWS::StackName}-fn-demo-${AWS::Region}
+      PermissionsBoundary: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/masr-pay-mcp-boundary
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals: { aws:SourceAccount: !Ref AWS::AccountId }
+      Policies:
+        - PolicyName: least-privilege
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !Sub ${DemoLogGroup.Arn}
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Ref AnthropicApiKey
+              - Effect: Allow # count today's messages, nothing else
+                Action: dynamodb:UpdateItem
+                Resource: !GetAtt DemoUsageTable.Arn
+
+  DemoFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
+    Properties:
+      Description: Public try-it page, Claude calls the MCP tools against the mock (fake money)
+      CodeUri: ../
+      Handler: run-demo.sh
+      Role: !GetAtt DemoRole.Arn
+      LoggingConfig:
+        LogGroup: !Ref DemoLogGroup
+      Environment:
+        Variables:
+          DEMO_MCP_URL: !Sub https://${McpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/mcp
+          DEMO_MOCK_URL: !Sub https://${MockApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}
+          ANTHROPIC_API_KEY_SECRET_ARN: !Ref AnthropicApiKey
+          DEMO_USAGE_TABLE: !Ref DemoUsageTable
+          DEMO_DAILY_MESSAGES: !Ref DemoDailyMessages
+      Events:
+        Demo:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref DemoApi
+            Path: /{proxy+}
+            Method: ANY
+        DemoRoot:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref DemoApi
+            Path: /
+            Method: GET
+
+  DemoApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      Description: Public "try it" page
+      DefaultRouteSettings: # each chat message makes a few Claude and MCP calls
+        ThrottlingRateLimit: 2
+        ThrottlingBurstLimit: 5
+
 Outputs:
+  DemoUrl:
+    Description: The public "try it" page.
+    Value: !Sub https://${DemoApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/
   McpUrl:
     Description: Point MCP clients here (Streamable HTTP), with X-Fawry-Merchant-Code and X-Fawry-Secure-Key headers.
     Value: !Sub https://${McpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/mcp

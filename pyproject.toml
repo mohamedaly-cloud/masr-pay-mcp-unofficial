@@ -28,8 +28,10 @@ masr-pay-mcp-unofficial = "masr_pay_mcp.__main__:main"
 [project.optional-dependencies]
 # The mock Fawry API (FastAPI app + ASGI server to run it locally).
 mock = ["fastapi>=0.115", "uvicorn>=0.30"]
+# The public "try it" page (demo_site/, not shipped in the package): Claude calls the MCP tools.
+demo = ["anthropic>=1.15,<2", "uvicorn>=0.30"]
 dev = [
-    "masr-pay-mcp-unofficial[mock]",
+    "masr-pay-mcp-unofficial[mock,demo]",
     "pytest>=8",
     "ruff>=0.6",
 ]
@@ -43,7 +45,7 @@ packages = ["masr_pay_mcp", "mock_fawry"]
 
 # Hatch skips only .gitignore'd files, so list what the sdist ships instead of shipping the tree.
 [tool.hatch.build.targets.sdist]
-include = ["masr_pay_mcp", "mock_fawry", "tests", "README.md", "LICENSE"]
+include = ["masr_pay_mcp", "mock_fawry", "demo_site", "tests", "README.md", "LICENSE"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
